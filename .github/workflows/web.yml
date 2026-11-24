@@ -64,6 +64,9 @@ jobs:
           pnpm start > /tmp/web.log 2>&1 &
           for i in $(seq 1 30); do curl -sf -o /dev/null http://localhost:3000/sign-in && break; sleep 1; done
       - uses: astral-sh/setup-uv@v6
+        with:
+          # No cache here: the post-run cache step fails this job otherwise.
+          enable-cache: false
       - name: Start the API
         working-directory: apps/api
         run: |
