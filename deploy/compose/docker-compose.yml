@@ -10,10 +10,14 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-ape}
+      APP_MIGRATOR_PASSWORD: ${APP_MIGRATOR_PASSWORD:-migrator-dev-password}
+      APP_AUTH_PASSWORD: ${APP_AUTH_PASSWORD:-auth-dev-password}
+      APP_BACKEND_PASSWORD: ${APP_BACKEND_PASSWORD:-backend-dev-password}
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-54320}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ../../db:/db:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s

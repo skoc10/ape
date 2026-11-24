@@ -36,6 +36,38 @@ tasks:
     desc: Stop local infrastructure and delete its volumes
     cmds: ["{{.COMPOSE}} -f {{.COMPOSE_FILE}} --env-file .env down -v"]
 
+  # --- database --------------------------------------------------------------
+  db:bootstrap:
+    desc: Create or refresh the three application roles (superuser step, idempotent)
+    cmds:
+      - "{{.COMPOSE}} -f {{.COMPOSE_FILE}} --env-file .env exec -T postgres sh /docker-entrypoint-initdb.d/10-init-roles.sh"
+
+  db:migrate:
+    desc: Apply pending dbmate migrations as app_migrator
+    cmds:
+      - dbmate --url "$MIGRATOR_DATABASE_URL" --migrations-dir db/migrations --no-dump-schema up
+
+  db:seed:
+    desc: Load the two demo tenants
+    cmds:
+      - "{{.COMPOSE}} -f {{.COMPOSE_FILE}} --env-file .env exec -T -e PGPASSWORD=$APP_MIGRATOR_PASSWORD postgres psql -v ON_ERROR_STOP=1 -q -h 127.0.0.1 -U app_migrator -d $POSTGRES_DB -f /db/seed.sql"
+
+  db:reset:
+    desc: Drop the database and rebuild it from scratch (roles, migrations, seed)
+    cmds:
+      - "{{.COMPOSE}} -f {{.COMPOSE_FILE}} --env-file .env exec -T postgres psql -v ON_ERROR_STOP=1 -q -U $POSTGRES_USER -d postgres -c 'drop database if exists \"{{.DB}}\" with (force)' -c 'create database \"{{.DB}}\"'"
+      - task: db:bootstrap
+      - task: db:migrate
+      - task: db:seed
+    vars:
+      DB:
+        sh: echo "${POSTGRES_DB:-ape}"
+
+  db:test:
+    desc: Run the pgTAP tenant isolation tests
+    cmds:
+      - "{{.COMPOSE}} -f {{.COMPOSE_FILE}} --env-file .env exec -T postgres sh -c 'pg_prove -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" /db/tests/*.sql'"
+
   dev:
     desc: Start infrastructure, then web, api and worker with live reload
     deps: [infra:up]
@@ -79,6 +111,7 @@ tasks:
     cmds:
       - task: test:api
       - task: test:agent
+      - task: db:test
 
   test:api:
     dir: apps/api

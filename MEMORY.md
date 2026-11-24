@@ -24,6 +24,24 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
   revive, errorlint), eslint-config-next.
 - **Geliştirme branch'i:** `claude/project-thread-2s1349`.
 
+### 1.2 PostgreSQL şeması ve RLS (2026-11-24)
+
+- **Better Auth şeması:** CLI artık `auth` paketi (`pnpm dlx auth@latest generate`); eski
+  `@better-auth/cli` 1.4'te kaldı. Çıktı `db/migrations/20261124000001_better_auth.sql` içinde.
+  Tablo adları tekil ve sütunlar camelCase: `"user"`, `"member"."organizationId"`, `"userId"`.
+- **Roller migration'da değil, bootstrap'ta:** `db/bootstrap/roles.sql` süper kullanıcıyla bir kez
+  çalışır (Compose'da initdb betiği, `task db:bootstrap`; k3s'te CNPG managed roles olacak).
+  Migration'lar `app_migrator` ile çalışır ve rol oluşturma yetkisi gerektirmez.
+- **`organization_settings` satırı trigger ile:** `app_auth` uygulama tablolarına yazamadığı için
+  boş ayar satırını `organization` üzerindeki `SECURITY DEFINER` trigger ekliyor (Better Auth
+  hook'u yerine). Böylece `app_auth` izolasyonu delinmiyor.
+- **Ek sıkılaştırmalar:** `app` şeması ve fonksiyonları PUBLIC'e kapalı; `app_backend` kimlik
+  tablolarından yalnızca `organization` ve `member` okuyabiliyor (`user`, `session`, `account`,
+  `jwks` kapalı).
+- **pgTAP:** `db/tests/tenant_isolation.sql` 64 test; `pg_prove` Postgres imajına kuruldu,
+  `task db:test` ile çalışır. RLS kapatılarak testlerin gerçekten kırıldığı doğrulandı.
+- **dbmate `--no-dump-schema`:** host'ta `pg_dump` olmadığı için `schema.sql` üretilmiyor.
+
 ## Kullanıcı Aksiyonu Gerekenler
 
 - **GitHub push yetkisi (1.1'den beri bekliyor).** Bu Mac'in keychain'indeki GitHub kimliği
