@@ -26,7 +26,13 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
 
 ## Kullanıcı Aksiyonu Gerekenler
 
-Şu an için yok.
+- **GitHub push yetkisi (1.1'den beri bekliyor).** Bu Mac'in keychain'indeki GitHub kimliği
+  `voloagent` ve `skoc10/ape` reposuna yazamıyor (403). `origin` adresi
+  `https://skoc10@github.com/skoc10/ape.git` olarak ayarlandı. Terminalde bir kez
+  `git push -u origin claude/project-thread-2s1349` çalıştırıp `skoc10` için bir Personal Access
+  Token (repo + workflow yetkili) girilmesi yeterli; token keychain'e kaydolur ve sonraki
+  push'lar otomatik çalışır. Alternatif: `voloagent` hesabını repoya collaborator eklemek.
+  O zamana kadar commit'ler yalnızca yerelde birikiyor ve CI iş akışları GitHub'da doğrulanamadı.
 
 ## Haftalık Review Notları
 
