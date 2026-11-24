@@ -102,6 +102,15 @@ assert.equal(r.status, 200);
 const org2 = r.data;
 ok("create two organizations");
 
+r = await alice.json("/api/auth/organization/create", { method: "POST", body: { name: "Shadow", slug: "sign-in" } });
+assert.equal(r.status, 400);
+ok("reserved URL names are rejected on the server");
+
+res = await alice.request("/sign-in?next=%2F%09%2Fevil.example");
+assert.equal(res.status, 307);
+assert.equal(res.headers.get("location"), "/");
+ok("sign-in never redirects off-site");
+
 // --- JWT and JWKS ------------------------------------------------------------
 const jwks = createRemoteJWKSet(new URL("/api/auth/jwks", BASE));
 async function apiToken(client) {

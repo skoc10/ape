@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { authClient } from "@/lib/auth-client";
+import { isValidOrgSlug } from "@/lib/slug";
 
 function slugify(value: string): string {
   return value
@@ -20,9 +21,6 @@ function slugify(value: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
 }
-
-// Top-level routes that an organization slug must not shadow.
-const RESERVED = new Set(["api", "sign-in", "sign-up", "onboarding", "accept-invitation", "_next"]);
 
 export function CreateOrganizationForm() {
   const router = useRouter();
@@ -37,7 +35,7 @@ export function CreateOrganizationForm() {
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
-    if (!effectiveSlug || RESERVED.has(effectiveSlug)) {
+    if (!isValidOrgSlug(effectiveSlug)) {
       setError("Please choose a different URL name.");
       return;
     }

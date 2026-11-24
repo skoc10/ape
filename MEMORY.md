@@ -104,4 +104,21 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
 
 ## Haftalık Review Notları
 
-Henüz yok.
+### Hafta 1 (ara rapor, 1.1-1.4; nihai hüküm 1.5 incelenince)
+
+Bağımsız reviewer kritik açık bulmadı. Düzeltilenler (2026-11-25):
+
+- **O1:** `TenantConn` artık `scope="function"`; transaction yanıttan önce commit ediliyor (testli).
+- **O2:** `safeNextPath` kontrol karakterlerini ve origin dışı hedefleri reddediyor (open redirect).
+- **D1:** JWKS hiç yüklenemediyse her istek 503; anahtarlar en geç 1 saatte yeniden çekiliyor.
+- **D2:** `app_backend`'in `member` ve `organization` tablo yetkisi kaldırıldı; üyelik yalnızca
+  `app.member_role(user, org)` fonksiyonuyla sorgulanıyor (toplu okuma yok).
+- **D4:** ayrılmış slug'lar sunucuda `beforeCreateOrganization` hook'unda reddediliyor.
+
+Ertelenenler:
+
+- **D3:** SMTP gelince `requireEmailVerification` ve `requireEmailVerificationOnInvitation` açılacak.
+- **D5 (4.6):** web güvenlik başlıkları (CSP, frame-ancestors, nosniff, Referrer-Policy),
+  `X-Powered-By` kapatma, prod'da `/docs`, `/openapi.json`, `/metrics` Ingress dışında,
+  veritabanı için `sslmode=verify-full`.
+- **D6:** kullanıcı silme açılmadan önce `created_by` / `triggered_by` için `ON DELETE SET NULL`.

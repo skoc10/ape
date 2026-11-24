@@ -144,9 +144,10 @@ select is((select count(*)::int from findings where org_id = 't_org_a'), 0, 'B r
 -- ---------------------------------------------------------------------------
 -- app_backend and the identity tables: membership lookup only
 -- ---------------------------------------------------------------------------
-select lives_ok($$ select 1 from "member" where "userId" = 't_user_a' and "organizationId" = 't_org_a' $$,
-  'app_backend can read member');
-select lives_ok($$ select 1 from "organization" where id = 't_org_a' $$, 'app_backend can read organization');
+select is(app.member_role('t_user_a', 't_org_a'), 'owner', 'app_backend can ask for one membership');
+select is(app.member_role('t_user_a', 't_org_b'), null, 'no role in an organization the user is not in');
+select throws_ok($$ select 1 from "member" $$, '42501', null, 'app_backend cannot enumerate memberships');
+select throws_ok($$ select 1 from "organization" $$, '42501', null, 'app_backend cannot enumerate organizations');
 select throws_ok($$ insert into "member" (id, "organizationId", "userId", role, "createdAt") values ('x', 't_org_b', 't_user_a', 'owner', now()) $$,
   '42501', null, 'app_backend cannot add members');
 select throws_ok($$ update "organization" set name = 'x' $$, '42501', null, 'app_backend cannot modify organizations');
@@ -181,6 +182,7 @@ select throws_ok($$ select 1 from audit_runs $$, '42501', null, 'app_auth cannot
 select throws_ok($$ select 1 from findings $$, '42501', null, 'app_auth cannot read findings');
 select throws_ok($$ insert into clusters (org_id, name) values ('t_org_a', 'x') $$, '42501', null, 'app_auth cannot write clusters');
 select throws_ok($$ select * from app.resolve_agent_token('\x0a') $$, '42501', null, 'app_auth cannot resolve agent tokens');
+select throws_ok($$ select app.member_role('t_user_a', 't_org_a') $$, '42501', null, 'app_auth cannot call app.member_role');
 select lives_ok(
   $$ insert into "organization" (id, name, slug, "createdAt") values ('t_org_c', 'C', 't-org-c', now()) $$,
   'app_auth can create an organization (settings trigger runs as its owner)');

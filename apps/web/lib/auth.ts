@@ -1,7 +1,10 @@
 import { betterAuth } from "better-auth";
 import { nextCookies } from "better-auth/next-js";
+import { APIError } from "better-auth/api";
 import { jwt, organization } from "better-auth/plugins";
 import { Pool } from "pg";
+
+import { isValidOrgSlug } from "./slug";
 
 // Better Auth connects with the `app_auth` role, which can only touch the
 // identity tables. Application tables are reachable only through the API.
@@ -20,6 +23,14 @@ export const auth = betterAuth({
   },
   plugins: [
     organization({
+      organizationHooks: {
+        // Enforced on the server: the form's own check is only a convenience.
+        beforeCreateOrganization: async ({ organization }) => {
+          if (!isValidOrgSlug(organization.slug ?? "")) {
+            throw new APIError("BAD_REQUEST", { message: "This URL name is not available." });
+          }
+        },
+      },
       // No SMTP in the MVP yet: the invitation link is shown to the inviter in
       // the panel and written to the server log. Only the invitation id is
       // logged, never the invitee's address.

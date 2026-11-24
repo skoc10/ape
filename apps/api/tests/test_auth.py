@@ -245,3 +245,66 @@ async def test_jwks_outage_is_503_not_401(make_token: TokenFactory) -> None:
     verifier = TokenVerifier(JWKSCache(fetch), issuer=ISSUER, audience=AUDIENCE)
     with pytest.raises(JWKSUnavailable):
         await verifier.verify(make_token("user", "org"))
+
+
+async def test_jwks_outage_stays_503_while_no_key_was_ever_loaded() -> None:
+    calls = 0
+
+    async def fetch() -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("auth server is down")
+
+    cache = JWKSCache(fetch, min_refresh_interval=3600)
+    for _ in range(3):  # also inside the refresh rate limit window
+        with pytest.raises(JWKSUnavailable):
+            await cache.get("any")
+    assert calls == 1
+
+
+async def test_keys_removed_from_the_jwks_expire_with_max_age() -> None:
+    old, new = new_signing_key(), new_signing_key()
+    served = [old]
+
+    async def fetch() -> dict[str, Any]:
+        return {"keys": [k.jwk for k in served]}
+
+    cache = JWKSCache(fetch, min_refresh_interval=0, max_age=0)
+    assert (await cache.get(old.kid)).key_id == old.kid
+    served[:] = [new]  # the auth server rotated and dropped the old key
+    with pytest.raises(InvalidToken):
+        await cache.get(old.kid)
+
+
+def test_tenant_transaction_commits_before_the_response_is_sent(
+    settings: Settings, signing_key: SigningKey, make_token: TokenFactory, tenant_a: Tenant
+) -> None:
+    from contextlib import asynccontextmanager
+
+    async def fetch_jwks() -> dict[str, Any]:
+        return {"keys": [signing_key.jwk]}
+
+    events: list[str] = []
+    app = create_app(settings, jwks_fetcher=fetch_jwks)
+
+    async def recording_app(scope: Any, receive: Any, send: Any) -> None:
+        async def recording_send(message: Any) -> None:
+            if scope["type"] == "http":
+                events.append(message["type"])
+            await send(message)
+
+        await app(scope, receive, recording_send)
+
+    with TestClient(recording_app) as client:
+        original = app.state.db.tenant
+
+        @asynccontextmanager
+        async def recording_tenant(org_id: str) -> Any:
+            async with original(org_id) as tc:
+                yield tc
+            events.append("commit")
+
+        app.state.db.tenant = recording_tenant
+        resp = client.get("/v1/me", headers=bearer(make_token(tenant_a.user_id, tenant_a.org_id)))
+        assert resp.status_code == 200
+    assert events.index("commit") < events.index("http.response.start"), events

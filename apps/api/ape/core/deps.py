@@ -59,4 +59,6 @@ async def tenant_connection(
         yield tc
 
 
-TenantConn = Annotated[TenantConnection, Depends(tenant_connection)]
+# scope="function": the transaction commits BEFORE the response is sent. With the default
+# (request) scope a failed commit would go unnoticed after the client already got a 2xx.
+TenantConn = Annotated[TenantConnection, Depends(tenant_connection, scope="function")]

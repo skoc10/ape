@@ -44,30 +44,39 @@ def http_jwks_fetcher(client: httpx.AsyncClient, url: str) -> JWKSFetcher:
 class JWKSCache:
     """Caches signing keys by ``kid``; refetches (rate limited) on an unknown ``kid``."""
 
-    def __init__(self, fetch: JWKSFetcher, *, min_refresh_interval: float = 10.0) -> None:
+    def __init__(
+        self, fetch: JWKSFetcher, *, min_refresh_interval: float = 10.0, max_age: float = 3600.0
+    ) -> None:
         self._fetch = fetch
         self._min_refresh_interval = min_refresh_interval
+        self._max_age = max_age
         self._keys: dict[str, PyJWK] = {}
-        self._last_refresh = float("-inf")
+        self._last_attempt = float("-inf")
+        self._last_success = float("-inf")
         self._lock = asyncio.Lock()
 
     async def get(self, kid: str) -> PyJWK:
-        key = self._keys.get(kid)
-        if key is not None:
-            return key
-        async with self._lock:
-            if kid not in self._keys and self._refresh_allowed():
-                await self._refresh()
+        if kid not in self._keys or self._stale():
+            async with self._lock:
+                if (kid not in self._keys or self._stale()) and self._refresh_allowed():
+                    await self._refresh()
+        if not self._keys:
+            # Never loaded: this is an outage (503), not a bad token (401).
+            raise JWKSUnavailable("could not load signing keys")
         key = self._keys.get(kid)
         if key is None:
             raise InvalidToken("unknown signing key")
         return key
 
+    def _stale(self) -> bool:
+        # Keys removed from the JWKS stop being trusted after max_age at the latest.
+        return time.monotonic() - self._last_success >= self._max_age
+
     def _refresh_allowed(self) -> bool:
-        return time.monotonic() - self._last_refresh >= self._min_refresh_interval
+        return time.monotonic() - self._last_attempt >= self._min_refresh_interval
 
     async def _refresh(self) -> None:
-        self._last_refresh = time.monotonic()
+        self._last_attempt = time.monotonic()
         try:
             jwks = PyJWKSet.from_dict(await self._fetch())
         except Exception as exc:
@@ -75,6 +84,7 @@ class JWKSCache:
                 return  # keep serving with the keys we already trust
             raise JWKSUnavailable("could not load signing keys") from exc
         self._keys = {k.key_id: k for k in jwks.keys if k.key_id}
+        self._last_success = time.monotonic()
 
 
 class TokenVerifier:
