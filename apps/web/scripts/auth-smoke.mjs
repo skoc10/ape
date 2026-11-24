@@ -206,6 +206,43 @@ if (API) {
   assert.equal((await fetch(`${API}/v1/me`)).status, 401);
   ok("API rejects requests without a token");
 
+  // Clusters: created through the API, rendered by the panel for the right tenant only.
+  await alice.json("/api/auth/organization/set-active", { method: "POST", body: { organizationId: org1.id } });
+  const { data: aliceToken } = await alice.json("/api/auth/token");
+  const clusterName = `smoke-${run}`;
+  res = await fetch(`${API}/v1/clusters`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${aliceToken.token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ name: clusterName }),
+  });
+  assert.equal(res.status, 201);
+  const cluster = await res.json();
+
+  // Alice's session now points at org2, yet org1's page must still show org1's data.
+  await alice.json("/api/auth/organization/set-active", { method: "POST", body: { organizationId: org2.id } });
+  res = await alice.request(`/${org1.slug}/clusters`);
+  assert.equal(res.status, 200);
+  assert.ok((await res.text()).includes(clusterName));
+  res = await alice.request(`/${org2.slug}/clusters`);
+  assert.ok(!(await res.text()).includes(clusterName));
+  res = await alice.request(`/${org2.slug}/clusters/${cluster.id}`);
+  assert.equal(res.status, 404);
+  res = await alice.request(`/${org1.slug}/clusters/${cluster.id}`);
+  assert.equal(res.status, 200);
+  ok("panel pins API calls to the organization in the URL, whatever the session's active one is");
+
+  const { data: bobToken } = await bob.json("/api/auth/token");
+  res = await fetch(`${API}/v1/clusters`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${bobToken.token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ name: `bob-${run}` }),
+  });
+  assert.equal(res.status, 403);
+  res = await bob.request(`/${org1.slug}/clusters`);
+  const bobView = await res.text();
+  assert.ok(bobView.includes(clusterName) && !bobView.includes("Add cluster"));
+  ok("a plain member can see clusters but cannot create them");
+
   // Bob leaves org1 after a token was issued: membership is re-checked by the API.
   const { data: stale } = await bob.json("/api/auth/token");
   r = await alice.json("/api/auth/organization/remove-member", {

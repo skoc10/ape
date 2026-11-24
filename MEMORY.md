@@ -76,7 +76,23 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
   var. `/metrics` API portunda; 4.6'da Ingress'ten dışarı açılmamalı.
 - **Testler gerçek Postgres'e karşı çalışır** (RLS'in anlamlı olması için); CI'da Compose ile.
 
+### 1.5 Cluster ve token API'si ile UI (2026-11-25)
+
+- **Uç noktalar:** `GET/POST /v1/clusters`, `GET /v1/clusters/{id}`,
+  `GET/POST /v1/clusters/{id}/tokens`, `DELETE /v1/clusters/{id}/tokens/{token_id}`.
+- **Rol kuralı (plan belirtmiyordu):** cluster ve token oluşturma/iptal yalnızca `owner` ve
+  `admin`; `member` yalnızca okur. Başka tenant'ın kaynağı her zaman 404 döner.
+- **Token:** `ape_` + 43 karakter base62 (32 bayt rastgele). Veritabanında yalnızca SHA-256 özeti
+  ve gösterim için `ape_` + ilk 8 karakter var; token yanıtta bir kez döner, loglanmaz.
+  İsteğe bağlı `expires_in_days` (1-365).
+- **Panel:** yazma işlemleri Next.js Server Action'ları üzerinden; her action oturumu ve üyeliği
+  yeniden doğrular, id'ler UUID değilse API'ye gitmez. Token iptali iki tıklamayla onaylanır.
+- **Helm komutu:** `AGENT_ENDPOINT` ve `AGENT_CHART_REF` ortam değişkenlerinden üretilir.
+
 ## Kullanıcı Aksiyonu Gerekenler
+
+- **Control Plane alan adı (1.5).** Sihirbazdaki helm komutu şu an `ws://localhost:8000/v1/agent`
+  gösteriyor. Prod için `AGENT_ENDPOINT=wss://cp.<alan-adı>/v1/agent` gerekli (VPS IP ve DNS, 4.6).
 
 - **SMTP bilgileri (1.3).** Davet ve e-posta doğrulama postaları için SMTP sunucusu, kullanıcı,
   parola ve gönderen adresi gerekli. Gelene kadar davet bağlantısı panelden kopyalanıyor.

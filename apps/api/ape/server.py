@@ -13,7 +13,7 @@ from ape.core.tenancy import MembershipCache
 from ape.observability.logging import configure_logging
 from ape.observability.metrics import Metrics, install_metrics
 from ape.observability.tracing import build_tracer_provider, instrument_app
-from ape.routers import health, me
+from ape.routers import clusters, health, me
 
 
 def create_app(
@@ -51,6 +51,7 @@ def create_app(
 
     app.include_router(health.router)
     app.include_router(me.router)
+    app.include_router(clusters.router)
 
     tracer_provider = build_tracer_provider(
         settings.service_name, settings.otel_exporter_otlp_endpoint
