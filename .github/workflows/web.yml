@@ -30,6 +30,10 @@ jobs:
       - run: pnpm exec next typegen
       - run: pnpm exec tsc --noEmit
       - run: pnpm build
+        env:
+          # Build-time placeholder only; Better Auth refuses to build with its default secret.
+          BETTER_AUTH_SECRET: ci-build-placeholder-not-a-real-secret-0000
+          BETTER_AUTH_URL: http://localhost:3000
 
   # Sign-up, organizations, invitations, JWT and JWKS against a real database.
   auth-smoke:
