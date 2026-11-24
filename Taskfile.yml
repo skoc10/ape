@@ -96,7 +96,7 @@ tasks:
 
   lint:web:
     dir: apps/web
-    cmds: [pnpm lint, pnpm exec tsc --noEmit]
+    cmds: [pnpm lint, pnpm exec next typegen, pnpm exec tsc --noEmit]
 
   lint:api:
     dir: apps/api
@@ -112,6 +112,11 @@ tasks:
       - task: test:api
       - task: test:agent
       - task: db:test
+
+  test:web:smoke:
+    desc: End-to-end auth smoke test (needs `task dev:web` or `next start` running and a migrated database)
+    dir: apps/web
+    cmds: [node scripts/auth-smoke.mjs]
 
   test:api:
     dir: apps/api

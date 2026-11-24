@@ -19,7 +19,19 @@ export const auth = betterAuth({
     minPasswordLength: 10,
   },
   plugins: [
-    organization(),
+    organization({
+      // No SMTP in the MVP yet: the invitation link is shown to the inviter in
+      // the panel and written to the server log. Only the invitation id is
+      // logged, never the invitee's address.
+      sendInvitationEmail: async ({ id }) => {
+        console.info(
+          JSON.stringify({
+            msg: "invitation created (email delivery not configured)",
+            link: `${baseURL}/accept-invitation/${id}`,
+          }),
+        );
+      },
+    }),
     jwt({
       jwt: {
         issuer: baseURL,

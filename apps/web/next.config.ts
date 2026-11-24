@@ -1,9 +1,8 @@
 import type { NextConfig } from "next";
 
+// Every page in the panel is per-user and per-tenant, so nothing is prerendered
+// or cached: Cache Components and partial prefetching stay off.
 const nextConfig: NextConfig = {
-  /* config options here */
-  cacheComponents: true,
-  partialPrefetching: true,
   turbopack: {
     rules: {
       "*.css": {

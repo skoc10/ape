@@ -42,7 +42,27 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
   `task db:test` ile çalışır. RLS kapatılarak testlerin gerçekten kırıldığı doğrulandı.
 - **dbmate `--no-dump-schema`:** host'ta `pg_dump` olmadığı için `schema.sql` üretilmiyor.
 
+### 1.3 Better Auth ve organizasyonlar (2026-11-24)
+
+- **Next.js 16 Cache Components kapalı:** Paneldeki her sayfa kullanıcıya ve tenant'a özel
+  olduğu için `cacheComponents` ve `partialPrefetching` kapatıldı. Route tipleri
+  `next typegen` ile üretiliyor (lint adımına eklendi).
+- **API token'ı aktif organizasyona sabitleniyor:** `lib/api.ts` içindeki `getApiToken(orgId)`,
+  oturumun aktif organizasyonu URL'deki organizasyondan farklıysa önce onu değiştirir, sonra
+  üretilen JWT'nin `org_id` claim'ini doğrular. Böylece iki sekmede iki farklı müşteri açıkken
+  yanlış tenant'a istek gitmez. JWT: `iss` = `BETTER_AUTH_URL`, `aud` = `ape-api`, 15 dk, EdDSA.
+- **Davet e-postası stub:** SMTP olmadığı için davet bağlantısı panelde (kopyalanabilir) gösterilir
+  ve sunucu loguna yalnızca bağlantı yazılır. E-posta doğrulaması MVP'de kapalı.
+- **UI dili İngilizce**, shadcn/ui `base-nova` stili (Base UI tabanlı). Parola en az 10 karakter.
+- **Uçtan uca test:** `apps/web/scripts/auth-smoke.mjs` (19 kontrol) `task test:web:smoke` ile ve
+  CI'da `auth-smoke` işinde gerçek veritabanına karşı çalışır.
+
 ## Kullanıcı Aksiyonu Gerekenler
+
+- **SMTP bilgileri (1.3).** Davet ve e-posta doğrulama postaları için SMTP sunucusu, kullanıcı,
+  parola ve gönderen adresi gerekli. Gelene kadar davet bağlantısı panelden kopyalanıyor.
+- **`BETTER_AUTH_SECRET` (prod).** `.env.example` içindeki değer yalnızca yerel içindir; prod için
+  `openssl rand -base64 32` ile üretilip Kubernetes Secret'ına konmalı (4.6).
 
 - **GitHub push yetkisi (1.1'den beri bekliyor).** Bu Mac'in keychain'indeki GitHub kimliği
   `voloagent` ve `skoc10/ape` reposuna yazamıyor (403). `origin` adresi
