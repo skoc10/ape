@@ -1,0 +1,23 @@
+name: charts
+on:
+  push:
+    paths: ["deploy/helm/**", ".github/workflows/charts.yml"]
+  pull_request:
+    paths: ["deploy/helm/**", ".github/workflows/charts.yml"]
+permissions:
+  contents: read
+concurrency:
+  group: charts-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Lint every chart that has a Chart.yaml
+        run: |
+          shopt -s nullglob
+          for chart in deploy/helm/*/; do
+            if [ -f "$chart/Chart.yaml" ]; then helm lint "$chart"; else echo "skip $chart (no Chart.yaml yet)"; fi
+          done

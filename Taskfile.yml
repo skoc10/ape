@@ -1,0 +1,125 @@
+# https://taskfile.dev — single entry point for the three languages in this repo.
+version: "3"
+
+dotenv: [".env"]
+
+vars:
+  COMPOSE:
+    sh: if docker compose version >/dev/null 2>&1; then echo "docker compose"; else echo "docker-compose"; fi
+  COMPOSE_FILE: deploy/compose/docker-compose.yml
+  KIND_CLUSTER: ape-dev
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds: [task --list]
+    silent: true
+
+  setup:
+    desc: Install dependencies for every app
+    cmds:
+      - cd apps/web && pnpm install --frozen-lockfile
+      - cd apps/api && uv sync
+      - cd agent && go mod download
+
+  # --- local infrastructure -------------------------------------------------
+  infra:up:
+    desc: Start PostgreSQL (with pgTAP) and S3 storage, wait until healthy (buckets are auto-created)
+    cmds:
+      - "{{.COMPOSE}} -f {{.COMPOSE_FILE}} --env-file .env up -d --build --wait postgres s3"
+
+  infra:down:
+    desc: Stop local infrastructure (keeps volumes)
+    cmds: ["{{.COMPOSE}} -f {{.COMPOSE_FILE}} --env-file .env down"]
+
+  infra:nuke:
+    desc: Stop local infrastructure and delete its volumes
+    cmds: ["{{.COMPOSE}} -f {{.COMPOSE_FILE}} --env-file .env down -v"]
+
+  dev:
+    desc: Start infrastructure, then web, api and worker with live reload
+    deps: [infra:up]
+    cmds:
+      - task --parallel dev:web dev:api dev:worker
+
+  dev:web:
+    dir: apps/web
+    cmds: [pnpm dev]
+
+  dev:api:
+    dir: apps/api
+    cmds: [uv run uvicorn ape.server:app --reload --port 8000]
+
+  dev:worker:
+    dir: apps/api
+    cmds: [uv run python -m ape.worker]
+
+  # --- quality gates --------------------------------------------------------
+  lint:
+    desc: Run every linter
+    cmds:
+      - task: lint:web
+      - task: lint:api
+      - task: lint:agent
+
+  lint:web:
+    dir: apps/web
+    cmds: [pnpm lint, pnpm exec tsc --noEmit]
+
+  lint:api:
+    dir: apps/api
+    cmds: [uv run ruff check ., uv run ruff format --check ., uv run mypy]
+
+  lint:agent:
+    dir: agent
+    cmds: [golangci-lint run ./...]
+
+  test:
+    desc: Run every test suite
+    cmds:
+      - task: test:api
+      - task: test:agent
+
+  test:api:
+    dir: apps/api
+    cmds: [uv run pytest -q]
+
+  test:agent:
+    dir: agent
+    cmds: [go test ./...]
+
+  build:
+    desc: Build web and agent
+    cmds:
+      - cd apps/web && pnpm build
+      - cd agent && go build ./...
+
+  gen:
+    desc: Generate Go and Python types from packages/protocol (task 2.1)
+    cmds:
+      - echo "protocol codegen lands in task 2.1"
+
+  # --- kubernetes -----------------------------------------------------------
+  kind-up:
+    desc: Create a local kind cluster for agent tests
+    status: ["kind get clusters | grep -qx {{.KIND_CLUSTER}}"]
+    cmds: ["kind create cluster --name {{.KIND_CLUSTER}}"]
+
+  kind-down:
+    desc: Delete the local kind cluster
+    cmds: ["kind delete cluster --name {{.KIND_CLUSTER}}"]
+
+  images:
+    desc: Build container images (Dockerfiles land in tasks 1.6 and 2.5)
+    cmds:
+      - echo "image builds land in tasks 1.6 and 2.5"
+
+  helm-package:
+    desc: Lint and package the Helm charts that exist
+    cmds:
+      - |
+        for chart in deploy/helm/*/; do
+          if [ -f "$chart/Chart.yaml" ]; then
+            helm lint "$chart" && helm package "$chart" -d dist/charts
+          fi
+        done

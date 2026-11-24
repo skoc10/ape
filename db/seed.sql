@@ -1,0 +1,1 @@
+-- Two test tenants (A and B). Filled in task 1.2 once the schema exists.
