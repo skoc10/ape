@@ -182,4 +182,45 @@ res = await alice.request(`/${org1.slug}/settings/members`);
 assert.equal(res.status, 200);
 ok("members page renders for the owner");
 
+// --- optional: the FastAPI backend accepts these tokens (set SMOKE_API_URL) -----
+const API = process.env.SMOKE_API_URL;
+if (API) {
+  const callMe = async (client) => {
+    const { data } = await client.json("/api/auth/token");
+    return fetch(`${API}/v1/me`, { headers: { Authorization: `Bearer ${data.token}` } });
+  };
+  // The failed switch above cleared Bob's active organization: no org, no API access.
+  res = await callMe(bob);
+  assert.equal(res.status, 403);
+  ok("API refuses a token without an active organization");
+
+  await bob.json("/api/auth/organization/set-active", { method: "POST", body: { organizationId: org1.id } });
+  res = await callMe(bob);
+  assert.equal(res.status, 200, await res.clone().text());
+  const me = await res.json();
+  assert.equal(me.org_id, org1.id);
+  assert.equal(me.db_org_id, org1.id);
+  assert.equal(me.role, "member");
+  ok("API verifies the Better Auth JWT through JWKS and pins the tenant in PostgreSQL");
+
+  assert.equal((await fetch(`${API}/v1/me`)).status, 401);
+  ok("API rejects requests without a token");
+
+  // Bob leaves org1 after a token was issued: membership is re-checked by the API.
+  const { data: stale } = await bob.json("/api/auth/token");
+  r = await alice.json("/api/auth/organization/remove-member", {
+    method: "POST",
+    body: { organizationId: org1.id, memberIdOrEmail: bobEmail },
+  });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const deadline = Date.now() + 70_000;
+  let status = 200;
+  while (status === 200 && Date.now() < deadline) {
+    status = (await fetch(`${API}/v1/me`, { headers: { Authorization: `Bearer ${stale.token}` } })).status;
+    if (status === 200) await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  assert.equal(status, 403);
+  ok("a removed member's still-valid token is refused once the membership cache expires");
+}
+
 console.log("\nauth smoke test passed");

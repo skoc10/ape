@@ -57,6 +57,25 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
 - **Uçtan uca test:** `apps/web/scripts/auth-smoke.mjs` (19 kontrol) `task test:web:smoke` ile ve
   CI'da `auth-smoke` işinde gerçek veritabanına karşı çalışır.
 
+### 1.4 FastAPI iskeleti, tenant bağlamı ve gözlemlenebilirlik (2026-11-24)
+
+- **Sürücü:** psycopg 3 (async) + psycopg_pool. Bağlantı almanın yalnızca iki yolu var:
+  `Database.tenant(org_id)` (işlem başında `set_config('app.org_id', ..., true)`) ve tenant
+  bağlamı olmayan `Database.system()` (üyelik sorgusu, token çözümleme, readiness).
+- **JWT:** PyJWT ile yalnızca `EdDSA` kabul edilir (algoritma başlıktan okunmaz); `exp`, `iat`,
+  `sub`, `aud`, `iss` zorunlu. JWKS `kid` bazında önbelleklenir, bilinmeyen `kid` için en fazla
+  10 sn'de bir yeniden çekilir. JWKS'e ulaşılamazsa 401 değil 503 döner.
+- **Üyelik önbelleği:** yalnızca olumlu sonuçlar 60 sn tutulur; üyelikten çıkarılan kullanıcının
+  geçerli token'ı en geç 60 sn sonra 403 alır (uçtan uca testle doğrulandı).
+- **Çift kilit:** SQL yalnızca `ape/repos` altında yazılır ve her fonksiyon `TenantConnection`
+  veya `SystemConnection` alır; `tests/test_architecture.py` bunu AST ile zorunlu kılıyor
+  (plandaki "ham SQL lint kuralı").
+- **Gözlemlenebilirlik:** structlog JSON (`trace_id`, `span_id`), OpenTelemetry FastAPI
+  enstrümantasyonu (OTLP yalnızca `OTEL_EXPORTER_OTLP_ENDPOINT` doluysa), Prometheus
+  `ape_http_request_duration_seconds{method,route,status}`. Etikette ham yol değil route şablonu
+  var. `/metrics` API portunda; 4.6'da Ingress'ten dışarı açılmamalı.
+- **Testler gerçek Postgres'e karşı çalışır** (RLS'in anlamlı olması için); CI'da Compose ile.
+
 ## Kullanıcı Aksiyonu Gerekenler
 
 - **SMTP bilgileri (1.3).** Davet ve e-posta doğrulama postaları için SMTP sunucusu, kullanıcı,
@@ -64,13 +83,8 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
 - **`BETTER_AUTH_SECRET` (prod).** `.env.example` içindeki değer yalnızca yerel içindir; prod için
   `openssl rand -base64 32` ile üretilip Kubernetes Secret'ına konmalı (4.6).
 
-- **GitHub push yetkisi (1.1'den beri bekliyor).** Bu Mac'in keychain'indeki GitHub kimliği
-  `voloagent` ve `skoc10/ape` reposuna yazamıyor (403). `origin` adresi
-  `https://skoc10@github.com/skoc10/ape.git` olarak ayarlandı. Terminalde bir kez
-  `git push -u origin claude/project-thread-2s1349` çalıştırıp `skoc10` için bir Personal Access
-  Token (repo + workflow yetkili) girilmesi yeterli; token keychain'e kaydolur ve sonraki
-  push'lar otomatik çalışır. Alternatif: `voloagent` hesabını repoya collaborator eklemek.
-  O zamana kadar commit'ler yalnızca yerelde birikiyor ve CI iş akışları GitHub'da doğrulanamadı.
+- ~~GitHub push yetkisi~~ Çözüldü (2026-11-24): `origin` artık
+  `https://skoc10@github.com/skoc10/ape.git` ve push çalışıyor.
 
 ## Haftalık Review Notları
 

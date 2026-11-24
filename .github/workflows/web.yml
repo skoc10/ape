@@ -1,9 +1,9 @@
 name: web
 on:
   push:
-    paths: ["apps/web/**", "db/migrations/**", ".github/workflows/web.yml"]
+    paths: ["apps/web/**", "apps/api/**", "db/migrations/**", ".github/workflows/web.yml"]
   pull_request:
-    paths: ["apps/web/**", "db/migrations/**", ".github/workflows/web.yml"]
+    paths: ["apps/web/**", "apps/api/**", "db/migrations/**", ".github/workflows/web.yml"]
 permissions:
   contents: read
 concurrency:
@@ -63,9 +63,19 @@ jobs:
           pnpm build
           pnpm start > /tmp/web.log 2>&1 &
           for i in $(seq 1 30); do curl -sf -o /dev/null http://localhost:3000/sign-in && break; sleep 1; done
-      - name: Auth smoke test
+      - uses: astral-sh/setup-uv@v6
+      - name: Start the API
+        working-directory: apps/api
+        run: |
+          set -a; . ../../.env; set +a
+          uv sync --frozen --no-dev
+          MEMBERSHIP_CACHE_TTL_SECONDS=3 uv run --no-dev uvicorn ape.server:app --factory --port 8000 > /tmp/api.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf -o /dev/null http://localhost:8000/readyz && break; sleep 1; done
+      - name: Auth smoke test (web + api)
         working-directory: apps/web
+        env:
+          SMOKE_API_URL: http://localhost:8000
         run: node scripts/auth-smoke.mjs http://localhost:3000
-      - name: Web server log
+      - name: Server logs
         if: failure()
-        run: cat /tmp/web.log
+        run: cat /tmp/web.log /tmp/api.log

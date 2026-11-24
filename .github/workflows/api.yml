@@ -1,9 +1,9 @@
 name: api
 on:
   push:
-    paths: ["apps/api/**", ".github/workflows/api.yml"]
+    paths: ["apps/api/**", "db/**", ".github/workflows/api.yml"]
   pull_request:
-    paths: ["apps/api/**", ".github/workflows/api.yml"]
+    paths: ["apps/api/**", "db/**", ".github/workflows/api.yml"]
 permissions:
   contents: read
 concurrency:
@@ -25,4 +25,12 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy
+      - name: Start PostgreSQL and apply migrations
+        working-directory: .
+        run: |
+          cp .env.example .env
+          docker compose -f deploy/compose/docker-compose.yml --env-file .env up -d --build --wait postgres
+          set -a; . ./.env; set +a
+          docker run --rm --network host -v "$PWD/db:/db:ro" ghcr.io/amacneil/dbmate:2 \
+            --url "$MIGRATOR_DATABASE_URL" --migrations-dir /db/migrations --no-dump-schema up
       - run: uv run pytest -q
