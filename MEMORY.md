@@ -147,7 +147,31 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
   (`forbidden`, `timeout`, `internal`); metrics API'si yoksa ya da bozuksa sessizce atlanır.
 - **Namespace hariç tutma** Namespace nesnelerinin kendisine de uygulanır.
 
+### 2.5 Ajan Helm chart'ı ve imajı (2026-11-25)
+
+- **İmaj:** `gcr.io/distroless/static-debian12:nonroot`, uid 65532, yaklaşık 12 MB. Dockerfile hem
+  BuildKit (çoklu mimari) hem klasik builder ile çalışır (bu Mac'te buildx yok).
+- **Chart `deploy/helm/ape-agent`:** Deployment (`Recreate`, tek replika), ServiceAccount, plandaki
+  salt-okur ClusterRole + Binding, Secret (ya da `existingSecret`), NetworkPolicy, isteğe bağlı
+  metrics Service + ServiceMonitor. Token dosya olarak mount edilir (`APE_TOKEN_FILE`), env'de değil.
+- **Chart kendini korur:** `token`/`existingSecret` yoksa ya da `ws://` uç noktası
+  `allowInsecure=true` olmadan verilirse `helm install` anlaşılır bir hatayla durur.
+- **NetworkPolicy:** ingress tamamen kapalı (metrics açıksa yalnızca `metrics.allowedNamespace`);
+  egress yalnızca DNS ve `egressPorts` (443, 6443). Vanilla NetworkPolicy alan adına göre
+  kısıtlayamadığı için isteğe bağlı `controlPlaneCIDRs` var.
+- **Probe yok:** `/metrics` varsayılan olarak loopback'te dinlediği için kubelet erişemez; ajan
+  ayar hatasında süreçten çıkar, bağlantı sorununda kendisi yeniden dener.
+- **Doğrulama:** kind (v1.37) üzerinde `helm install` ile ajan yereldeki API'ye bağlandı.
+  `ci/rbac-check.sh` yazma fiili ve `secrets`/`configmaps` erişimi olmadığını kanıtlıyor (kasıtlı
+  yetki verilince kırıldığı görüldü); CI'da kind üzerinde çalışıyor.
+- **Yayın:** `agent-release.yml`, `agent-v*` etiketi ya da elle tetiklemeyle imajı
+  (amd64 + arm64) ve chart'ı `ghcr.io/skoc10` altına OCI olarak iter. Henüz çalıştırılmadı.
+
 ## Kullanıcı Aksiyonu Gerekenler
+
+- **Ajan imajı ve chart'ının ilk yayını (2.5).** `git tag agent-v0.1.0 && git push origin
+  agent-v0.1.0` (ya da Actions sekmesinden `agent-release`) çalıştırılmalı; ardından GitHub'da
+  `ape-agent` ve `charts/ape-agent` paketleri müşterilerin çekebilmesi için **public** yapılmalı.
 
 - **Control Plane alan adı (1.5).** Sihirbazdaki helm komutu şu an `ws://localhost:8000/v1/agent`
   gösteriyor. Prod için `AGENT_ENDPOINT=wss://cp.<alan-adı>/v1/agent` gerekli (VPS IP ve DNS, 4.6).

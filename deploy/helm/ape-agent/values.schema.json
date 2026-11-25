@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["endpoint"],
+  "properties": {
+    "endpoint": {
+      "type": "string",
+      "pattern": "^wss?://[^\\s]+$",
+      "description": "Control Plane gateway URL, e.g. wss://cp.example.com/v1/agent"
+    },
+    "token": { "type": "string" },
+    "existingSecret": { "type": "string" },
+    "allowInsecure": { "type": "boolean" },
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "port": { "type": "integer", "minimum": 1024, "maximum": 65535 }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "controlPlaneCIDRs": { "type": "array", "items": { "type": "string" } },
+        "egressPorts": { "type": "array", "items": { "type": "integer" } }
+      }
+    }
+  }
+}

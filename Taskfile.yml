@@ -171,9 +171,23 @@ tasks:
     cmds: ["kind delete cluster --name {{.KIND_CLUSTER}}"]
 
   images:
-    desc: Build container images (Dockerfiles land in tasks 1.6 and 2.5)
+    desc: Build container images locally (api, web and worker images land in task 1.6)
     cmds:
-      - echo "image builds land in tasks 1.6 and 2.5"
+      - docker build -t ghcr.io/skoc10/ape-agent:dev --build-arg VERSION=dev agent
+
+  kind-agent:
+    desc: Install the agent chart on the local kind cluster (TOKEN=... ENDPOINT=ws://<host>:8000/v1/agent)
+    deps: [kind-up, images]
+    requires:
+      vars: [TOKEN, ENDPOINT]
+    cmds:
+      - kind load docker-image ghcr.io/skoc10/ape-agent:dev --name {{.KIND_CLUSTER}}
+      - >-
+        helm --kube-context kind-{{.KIND_CLUSTER}} upgrade --install ape-agent deploy/helm/ape-agent
+        -n ape-system --create-namespace --set token={{.TOKEN}} --set endpoint={{.ENDPOINT}}
+        --set allowInsecure=true --set image.tag=dev
+        --set 'networkPolicy.egressPorts={443,6443,8000}' --wait --timeout 120s
+      - KUBECTL_CONTEXT=kind-{{.KIND_CLUSTER}} deploy/helm/ape-agent/ci/rbac-check.sh ape-system
 
   helm-package:
     desc: Lint and package the Helm charts that exist
@@ -181,6 +195,6 @@ tasks:
       - |
         for chart in deploy/helm/*/; do
           if [ -f "$chart/Chart.yaml" ]; then
-            helm lint "$chart" && helm package "$chart" -d dist/charts
+            helm lint "$chart" -f "$chart/ci/test-values.yaml" && helm package "$chart" -d dist/charts
           fi
         done

@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ape-agent.name" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ape-agent.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # one session per cluster: never run two agents side by side
+  selector:
+    matchLabels:
+      {{- include "ape-agent.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ape-agent.selectorLabels" . | nindent 8 }}
+      annotations:
+        {{- if not .Values.existingSecret }}
+        checksum/token: {{ .Values.token | sha256sum }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "ape-agent.name" . }}
+      automountServiceAccountToken: true
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: APE_ENDPOINT
+              value: {{ .Values.endpoint | quote }}
+            - name: APE_TOKEN_FILE
+              value: /var/run/ape/token
+            {{- if .Values.allowInsecure }}
+            - name: APE_ALLOW_INSECURE
+              value: "true"
+            {{- end }}
+            - name: APE_METRICS_ADDR
+              value: {{ printf "%s:%d" (ternary "0.0.0.0" "127.0.0.1" .Values.metrics.enabled) (int .Values.metrics.port) | quote }}
+            {{- if .Values.otlpEndpoint }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.otlpEndpoint | quote }}
+            {{- end }}
+          {{- if .Values.metrics.enabled }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+          {{- end }}
+          volumeMounts:
+            - name: token
+              mountPath: /var/run/ape
+              readOnly: true
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: token
+          secret:
+            secretName: {{ include "ape-agent.secretName" . }}
+            items:
+              - key: token
+                path: token
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

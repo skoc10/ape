@@ -1,0 +1,7 @@
+apiVersion: v2
+name: ape-agent
+description: Read-only Data Plane agent. Connects outbound to the Control Plane; never writes to the cluster and never reads Secret or ConfigMap contents.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.25.0-0"

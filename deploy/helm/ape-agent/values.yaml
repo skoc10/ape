@@ -1,0 +1,48 @@
+# -- Control Plane gateway, e.g. wss://cp.example.com/v1/agent (required).
+endpoint: ""
+# -- Agent token shown once in the panel (required unless existingSecret is set).
+token: ""
+# -- Use an existing Secret (key: token) instead of creating one from `token`.
+existingSecret: ""
+# -- Allow a plain ws:// endpoint. Local development only: the token would travel unencrypted.
+allowInsecure: false
+
+image:
+  repository: ghcr.io/skoc10/ape-agent
+  # -- Defaults to the chart appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+resources:
+  requests:
+    cpu: 20m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+metrics:
+  # -- Expose /metrics inside the cluster. Off by default: the port then only listens on loopback.
+  enabled: false
+  port: 9090
+  serviceMonitor:
+    # -- Create a Prometheus Operator ServiceMonitor (needs metrics.enabled).
+    enabled: true
+    interval: 30s
+    labels: {}
+  # -- Only this namespace may scrape the agent when the NetworkPolicy is on.
+  allowedNamespace: monitoring
+
+networkPolicy:
+  # -- Deny all ingress and limit egress to DNS, the Kubernetes API and the Control Plane.
+  enabled: true
+  # -- Restrict Control Plane egress to these CIDRs. Empty allows the ports below to any address.
+  controlPlaneCIDRs: []
+  # -- TCP ports the agent may dial: Control Plane (443) and the Kubernetes API (443/6443).
+  egressPorts: [443, 6443]
+
+otlpEndpoint: ""
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}
