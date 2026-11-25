@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,8 +13,12 @@ import (
 	"syscall"
 	"time"
 
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
+
+	"github.com/skoc10/ape/agent/internal/collect"
 	"github.com/skoc10/ape/agent/internal/config"
-	"github.com/skoc10/ape/agent/internal/protocol"
 	"github.com/skoc10/ape/agent/internal/telemetry"
 	"github.com/skoc10/ape/agent/internal/transport"
 )
@@ -59,16 +64,29 @@ func run(logger *slog.Logger) error {
 
 	// The endpoint is logged, the token never is.
 	logger.Info("ape-agent starting", "version", version, "endpoint", cfg.Endpoint, "metrics_addr", cfg.MetricsAddr)
+	kube, err := rest.InClusterConfig()
+	if err != nil {
+		return fmt.Errorf("in-cluster config: %w", err)
+	}
+	kube.UserAgent = "ape-agent/" + version
+	dyn, err := dynamic.NewForConfig(kube)
+	if err != nil {
+		return fmt.Errorf("kubernetes client: %w", err)
+	}
+	disco, err := discovery.NewDiscoveryClientForConfig(kube)
+	if err != nil {
+		return fmt.Errorf("discovery client: %w", err)
+	}
+	collector := &collect.Collector{Dynamic: dyn, Discovery: disco, Metrics: metrics, Logger: logger, Version: version}
+
 	client := &transport.Client{
-		Endpoint: cfg.Endpoint,
-		Token:    cfg.Token,
-		Hello: func(context.Context) protocol.HelloPayload {
-			// Cluster facts and collectors arrive with task 2.4.
-			return protocol.HelloPayload{AgentVersion: version, K8SVersion: "unknown", NodeCount: 0, Capabilities: []string{}}
-		},
-		Metrics: metrics,
-		Logger:  logger,
-		Tracer:  tracing.Tracer("ape-agent"),
+		Endpoint:  cfg.Endpoint,
+		Token:     cfg.Token,
+		Hello:     collector.Hello,
+		OnCollect: collector.Handle,
+		Metrics:   metrics,
+		Logger:    logger,
+		Tracer:    tracing.Tracer("ape-agent"),
 	}
 	return client.Run(ctx)
 }

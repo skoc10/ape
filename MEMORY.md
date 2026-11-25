@@ -132,6 +132,21 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
 - **Tek komut:** ajan yalnızca `collect_request` işler, aynı anda tek toplama; diğer her mesaj
   yok sayılır.
 
+### 2.4 Go ajanı: toplayıcılar ve kaynakta temizlik (2026-11-25)
+
+- **client-go dynamic client** ile sabit bir kaynak tablosu (`internal/collect/resources.go`, 21
+  tür) sayfalı listelenir. `collect_request` listeyi daraltabilir ama genişletemez; Secret ve
+  ConfigMap tabloda yok. Ajan yalnızca `list` fiilini kullanır (testli).
+- **Temizlik:** `managedFields` ve `last-applied-configuration` silinir; tüm container türlerinde
+  (init ve ephemeral dahil; Pod, şablonlu iş yükleri, CronJob) `env[].value` her zaman
+  `<redacted:len=N>` olur, `valueFrom` kalır; `command`/`args` içinde hassas adlı bayrakların
+  değerleri (`--x=deger` ve `--x deger`) ile URL içindeki parolalar maskelenir.
+- **Parçalama:** tür başına, bütün nesnelerden oluşan gzip'li JSON dizileri; gzip boyutu 360 KiB'i
+  aşarsa ikiye bölünür, tek başına sığmayan nesne atlanır ve `truncated: true` olur.
+- **Hata davranışı:** zorunlu bir türün listelenememesi çalışmayı `error` mesajıyla bitirir
+  (`forbidden`, `timeout`, `internal`); metrics API'si yoksa ya da bozuksa sessizce atlanır.
+- **Namespace hariç tutma** Namespace nesnelerinin kendisine de uygulanır.
+
 ## Kullanıcı Aksiyonu Gerekenler
 
 - **Control Plane alan adı (1.5).** Sihirbazdaki helm komutu şu an `ws://localhost:8000/v1/agent`
