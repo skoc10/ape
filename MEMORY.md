@@ -395,7 +395,39 @@ ve model volume'u (yaklaşık 9 GB), dört Control Plane imajı, Go/uv/lint önb
 `apps/web/.next`. Şu an yaklaşık 12 GB boş. Bu makinede büyük imaj build'i ve yerel LLM denemesi
 yapılmamalı; ağır doğrulamalar CI'da.
 
+### 4.6 VPS'te k3s dağıtımı (2026-11-25, tamamlandı)
+
+- **Sunucu:** GCP `e2-standard-2` `ape-cp-01` (2 vCPU, 8 GB, 80 GB, Ubuntu 24.04), SSH
+  `office-access@35.207.186.10`, kubeconfig `~/.kube/config`. DNS: `cp.skoc.site` ve
+  `files.skoc.site` (Cloudflare DNS-only).
+- **Yayın:** `agent-v0.1.0` ve `cp-v0.1.0` etiketleri; beş imaj ve iki chart `ghcr.io/skoc10`
+  altında, depo public olduğu için paketler de doğrudan public çıktı.
+- **Kurulu olanlar:** k3s v1.37.2 (Traefik), cert-manager (ClusterIssuer `letsencrypt`, e-postasız),
+  CloudNativePG operatörü, kube-prometheus-stack (Grafana ve Alertmanager kapalı, 15 gün saklama),
+  `ape` release'i (chart 0.1.0, değerler sunucuda `~/values-production.yaml`).
+- **Doğrulananlar:** Let's Encrypt sertifikası iki alan adı için geçerli; yalnızca HTTPS (HTTP 404);
+  dışarıdan `/v1/me`, `/metrics`, `/docs` erişilemiyor; Prometheus `ape-api` ve `ape-worker`
+  hedeflerini topluyor (12 hedefin tamamı sağlıklı); WAL arşivleme çalışıyor.
+- **Canlı uçtan uca kontrol:** yayınlanan ajan chart'ı VPS'in kendi k3s'ine kuruldu, WSS üzerinden
+  bağlandı, audit 376 nesne ve 45 bulguyla tamamlandı, PDF `files.skoc.site` imzalı bağlantısıyla
+  indi. `helm install`'dan rapora 18 saniye. Kontrol için açılan kullanıcı, workspace ve ajan
+  sonradan silindi (S3'te o çalışmanın snapshot ve rapor nesneleri kaldı).
+- **Yedekten geri yükleme denendi:** isteğe bağlı yedek 34 sn'de tamamlandı; ayrı bir cluster'a
+  (`ape-pg-restore`) geri yüklendi, satır sayıları ve en yeni kayıt kaynakla birebir, üç rol ve
+  5 tabloda zorunlu RLS yerinde; deneme cluster'ı silindi.
+- **Kurulumda çıkanlar ve chart 0.1.1'e alınanlar:** Traefik HTTP'yi de sunuyordu; Ingress artık
+  `websecure` giriş noktasına sabit (sunucuda değer dosyasıyla, chart'ta varsayılan olarak).
+  k3s rehberine kubeconfig, node bekleme döngüsü ve Prometheus bayrakları eklendi.
+- **Backlog:** CNPG'nin yerleşik `barmanObjectStore` yöntemi 1.32'de kalkacak, Barman Cloud
+  Plugin'e geçilmeli. Yedekler aynı VPS'teki depolamada (makine kaybına karşı korumaz).
+  `api` ve `worker` aynı metrik adlarını dışa veriyor (kullanılmayanlar 0). Chart 0.1.1 henüz
+  yayınlanmadı (bir sonraki `cp-v*` etiketiyle).
+
 ## Kullanıcı Aksiyonu Gerekenler
+
+- **`ape-secrets` yedeği (4.6).** `kubectl -n ape get secret ape-secrets -o yaml` çıktısı güvenli bir
+  yere alınmalı; `MASKING_KEY` ve veritabanı parolaları yeniden üretilemez.
+- **Firewall (4.6).** 22 ve 6443 herkese açık; yalnızca kendi IP adres(ler)ine kısıtlanmalı.
 
 - **VPS ve DNS (4.6).** `deploy/k3s/README.md` adımları hazır; gereken: 4 GB+ RAM'li bir VPS ve iki
   A kaydı (ör. `cp.<alan>` ve `files.<alan>`). Ardından `cp-v0.1.0` etiketiyle imajlar ve chart

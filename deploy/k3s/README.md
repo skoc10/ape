@@ -9,8 +9,12 @@ and `files.example.com` (report downloads).
 ## 1. k3s
 
 ```bash
-curl -sfL https://get.k3s.io | sh -
-sudo k3s kubectl get nodes
+curl -sfL https://get.k3s.io | sudo sh -s - --write-kubeconfig-mode 600
+# the node registers a few seconds after the installer returns
+until sudo k3s kubectl get nodes 2>/dev/null | grep -q " Ready"; do sleep 3; done
+curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | sudo bash
+mkdir -p ~/.kube && sudo cat /etc/rancher/k3s/k3s.yaml > ~/.kube/config && chmod 600 ~/.kube/config
+echo 'export KUBECONFIG=$HOME/.kube/config' >> ~/.bashrc && export KUBECONFIG=$HOME/.kube/config
 ```
 
 k3s ships Traefik as the ingress controller; WebSocket traffic works without extra settings.
@@ -22,8 +26,9 @@ to use `kubectl` and `helm` from there.
 ```bash
 helm repo add jetstack https://charts.jetstack.io
 helm upgrade --install cert-manager jetstack/cert-manager -n cert-manager --create-namespace --set crds.enabled=true --wait
-# edit the e-mail address first
+# set your e-mail address first (or delete the line: it is optional)
 kubectl apply -f deploy/k3s/cluster-issuer.yaml
+kubectl get clusterissuer letsencrypt        # READY must be True
 ```
 
 ## 3. CloudNativePG operator (PostgreSQL)
@@ -77,17 +82,26 @@ change: placeholders in old and new audits would no longer match.
 kubectl -n ape get secret ape-secrets -o yaml > ape-secrets.backup.yaml   # store it somewhere safe
 ```
 
-What is reachable from the internet: the panel (`/`) and the agent WebSocket (`/v1/agent`) on
-`cp.example.com`, and signed download links on `files.example.com`. The REST API, `/metrics`,
+What is reachable from the internet, over HTTPS only: the panel (`/`) and the agent WebSocket
+(`/v1/agent`) on `cp.example.com`, and signed download links on `files.example.com`. The REST API, `/metrics`,
 `/docs` and the database are only reachable inside the cluster.
 
 ## 6. Metrics (optional)
 
 ```bash
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm upgrade --install monitoring prometheus-community/kube-prometheus-stack -n monitoring --create-namespace
+helm upgrade --install monitoring prometheus-community/kube-prometheus-stack -n monitoring --create-namespace \
+  --set grafana.enabled=false --set alertmanager.enabled=false \
+  --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
+  --set prometheus.prometheusSpec.retention=15d \
+  --set 'prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.accessModes[0]=ReadWriteOnce' \
+  --set prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.resources.requests.storage=10Gi
 # then set observability.serviceMonitor.enabled=true and upgrade the release
 ```
+
+`serviceMonitorSelectorNilUsesHelmValues=false` makes Prometheus pick up the ServiceMonitors of
+other releases. Prometheus is not exposed; look at it with
+`kubectl -n monitoring port-forward svc/monitoring-kube-prometheus-prometheus 9090`.
 
 Logs are read with `kubectl -n ape logs deploy/ape-api` (JSON lines with `trace_id`).
 
@@ -101,7 +115,11 @@ kubectl -n ape get backups.postgresql.cnpg.io
 kubectl cnpg status ape-pg -n ape            # needs the cnpg kubectl plugin
 ```
 
-Try a restore once, before you need it: create a second cluster from the backup and compare.
+Take a backup on demand by creating a `Backup` object (`kind: Backup`, `spec.cluster.name: ape-pg`)
+and wait until `kubectl -n ape get backups.postgresql.cnpg.io` shows it as completed.
+
+Try a restore once, before you need it: create a second cluster from the backup, compare row
+counts with the live one, then delete it (`kubectl -n ape delete cluster ape-pg-restore`).
 
 ```yaml
 apiVersion: postgresql.cnpg.io/v1

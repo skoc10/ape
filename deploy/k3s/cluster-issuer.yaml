@@ -1,4 +1,5 @@
-# Let's Encrypt issuer for cert-manager. Replace the e-mail address, then:
+# Let's Encrypt issuer for cert-manager. Replace the e-mail address (expiry warnings go
+# there) or delete that line, then:
 #   kubectl apply -f deploy/k3s/cluster-issuer.yaml
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer

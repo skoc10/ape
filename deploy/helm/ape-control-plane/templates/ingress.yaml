@@ -11,6 +11,12 @@ metadata:
   annotations:
     {{- if .Values.ingress.tls.enabled }}
     cert-manager.io/cluster-issuer: {{ .Values.ingress.tls.clusterIssuer }}
+    {{- if eq .Values.ingress.className "traefik" }}
+    # HTTPS only: nothing of the panel or the agent endpoint is served over plain HTTP.
+    # (cert-manager's HTTP-01 solver uses its own Ingress and keeps working.)
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    {{- end }}
     {{- end }}
     {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
