@@ -169,6 +169,26 @@ select is_empty($$ select * from app.resolve_agent_token('\x0d') $$, 'an expired
 select is_empty($$ select * from app.resolve_agent_token('\xff') $$, 'an unknown token does not resolve');
 
 -- ---------------------------------------------------------------------------
+-- worker queue: one run at a time, with its tenant, and nothing else
+-- ---------------------------------------------------------------------------
+reset role;
+-- Whatever a developer database already has queued is parked for the duration of the test.
+update audit_runs set status = 'failed' where status in ('collected', 'analyzing', 'reporting');
+update audit_runs set status = 'collected' where id = 'bbbbbbbb-0000-4000-8000-000000000005';
+set local role app_backend;
+select set_config('app.org_id', '', true);
+select is((select count(*)::int from audit_runs), 0, 'the worker sees no runs before claiming');
+select results_eq(
+  $$ select id, org_id from app.claim_audit_run() $$,
+  $$ values ('bbbbbbbb-0000-4000-8000-000000000005'::uuid, 't_org_b'::text) $$,
+  'claiming hands out the collected run together with its tenant');
+select is_empty($$ select * from app.claim_audit_run() $$, 'a claimed run is not handed out twice');
+select is((select count(*)::int from audit_runs), 0, 'claiming does not open other tenants'' rows');
+select set_config('app.org_id', 't_org_b', true);
+select is((select status from audit_runs where id = 'bbbbbbbb-0000-4000-8000-000000000005'), 'analyzing',
+  'the claimed run is marked as analyzing');
+
+-- ---------------------------------------------------------------------------
 -- app_auth: identity tables only, no application data at all
 -- ---------------------------------------------------------------------------
 reset role;
@@ -183,6 +203,7 @@ select throws_ok($$ select 1 from findings $$, '42501', null, 'app_auth cannot r
 select throws_ok($$ insert into clusters (org_id, name) values ('t_org_a', 'x') $$, '42501', null, 'app_auth cannot write clusters');
 select throws_ok($$ select * from app.resolve_agent_token('\x0a') $$, '42501', null, 'app_auth cannot resolve agent tokens');
 select throws_ok($$ select app.member_role('t_user_a', 't_org_a') $$, '42501', null, 'app_auth cannot call app.member_role');
+select throws_ok($$ select * from app.claim_audit_run() $$, '42501', null, 'app_auth cannot claim audit runs');
 select lives_ok(
   $$ insert into "organization" (id, name, slug, "createdAt") values ('t_org_c', 'C', 't-org-c', now()) $$,
   'app_auth can create an organization (settings trigger runs as its owner)');

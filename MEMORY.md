@@ -236,6 +236,22 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
 - **Doğrulama:** her kural için pozitif ve negatif test; kötü manifest seti tam olarak
   `expected.yaml`'daki bulguları üretiyor, `clean-app` temiz; maskeli sette sonuç aynı.
 
+### 3.4 Worker servisi (2026-11-25)
+
+- **Kuyruk ikinci `SECURITY DEFINER` istisnası:** worker tenant'ı bilmeden RLS altında hiçbir satır
+  göremediği için işi `app.claim_audit_run()` verir (`FOR UPDATE SKIP LOCKED`, FIFO). Fonksiyon
+  tek satır ve onun `org_id`'sini döndürür; geri kalan her şey `db.tenant(org_id)` altında.
+  Yalnızca `app_backend` çağırabilir (pgTAP'ta testli).
+- **Kilit zaman aşımı:** `locked_at` 10 dakikadan eskiyse (`WORKER_STALE_AFTER_SECONDS`) çalışma
+  yeniden alınabilir. Sağlıklı uzun işler için worker 60 sn'de bir `locked_at`'i yeniler.
+- **Zehirli iş koruması (plana ek):** `audit_runs.attempts` sütunu; 3 denemeden sonra çalışma
+  `failed` olur, sonsuza kadar yeniden denenmez.
+- **Aşamalar:** `rules` (snapshot'ı S3'ten oku, kuralları çalıştır, bulguları yaz), `llm` (3.5),
+  `report` (Hafta 4'te dolacak), sonra `completed`. Hata durumunda yalnızca istisna türü saklanır
+  ve loglanır (mesaj veri içerebilir).
+- **Süreç:** `python -m ape.worker` ayrı süreç, aynı anda tek iş, kendi `/metrics` portu (9091):
+  `ape_audit_runs_total{status}`, `ape_audit_stage_seconds{stage}`.
+
 ## Kullanıcı Aksiyonu Gerekenler
 
 - **`MASKING_KEY` (prod).** `.env.example` içindeki değer yalnızca yerel içindir; prod için

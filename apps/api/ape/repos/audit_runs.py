@@ -3,7 +3,7 @@ from uuid import UUID
 
 from psycopg.types.json import Jsonb
 
-from ape.core.db import TenantConnection
+from ape.core.db import SystemConnection, TenantConnection
 
 _COLUMNS = (
     "id, cluster_id, status, triggered_by, score, stats, pr_url, error, created_at, finished_at, "
@@ -78,6 +78,64 @@ async def mark_failed(tc: TenantConnection, run_id: UUID, *, error: str) -> bool
     cur = await tc.conn.execute(
         "update audit_runs set status = 'failed', error = %s, finished_at = now() "
         "where org_id = %s and id = %s and status in ('queued', 'collecting')",
+        (error[:500], tc.org_id, run_id),
+    )
+    return cur.rowcount == 1
+
+
+# --- worker queue --------------------------------------------------------------------
+
+
+async def claim(
+    sc: SystemConnection, *, stale_after_seconds: int, max_attempts: int
+) -> dict[str, Any] | None:
+    """Takes the next run off the queue (FOR UPDATE SKIP LOCKED inside PostgreSQL).
+
+    Returns its id together with its org_id; everything after this call happens
+    under that tenant's context.
+    """
+    cur = await sc.conn.execute(
+        "select id, org_id, cluster_id from app.claim_audit_run(make_interval(secs => %s), %s)",
+        (stale_after_seconds, max_attempts),
+    )
+    return await cur.fetchone()
+
+
+async def set_stage(tc: TenantConnection, run_id: UUID, status: str) -> bool:
+    """Moves a claimed run to the next stage and proves the worker is still alive."""
+    if status not in {"analyzing", "reporting"}:
+        raise ValueError(f"not a worker stage: {status}")
+    cur = await tc.conn.execute(
+        "update audit_runs set status = %s, locked_at = now() "
+        "where org_id = %s and id = %s and status in ('analyzing', 'reporting')",
+        (status, tc.org_id, run_id),
+    )
+    return cur.rowcount == 1
+
+
+async def heartbeat(tc: TenantConnection, run_id: UUID) -> None:
+    await tc.conn.execute(
+        "update audit_runs set locked_at = now() "
+        "where org_id = %s and id = %s and status in ('analyzing', 'reporting')",
+        (tc.org_id, run_id),
+    )
+
+
+async def complete(tc: TenantConnection, run_id: UUID, *, stats: dict[str, Any]) -> bool:
+    cur = await tc.conn.execute(
+        "update audit_runs set status = 'completed', finished_at = now(), locked_at = null, "
+        "stats = stats || %s "
+        "where org_id = %s and id = %s and status in ('analyzing', 'reporting')",
+        (Jsonb(stats), tc.org_id, run_id),
+    )
+    return cur.rowcount == 1
+
+
+async def fail_processing(tc: TenantConnection, run_id: UUID, *, error: str) -> bool:
+    cur = await tc.conn.execute(
+        "update audit_runs set status = 'failed', error = %s, finished_at = now(), "
+        "locked_at = null "
+        "where org_id = %s and id = %s and status in ('analyzing', 'reporting')",
         (error[:500], tc.org_id, run_id),
     )
     return cur.rowcount == 1

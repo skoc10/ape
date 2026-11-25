@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     # Master key for masking placeholders; a per-tenant key is derived from it.
     masking_key: str = ""
 
+    # Worker (queue consumer for rules, LLM and reports).
+    worker_poll_seconds: float = 2.0
+    worker_stale_after_seconds: int = 600
+    worker_max_attempts: int = 3
+    worker_heartbeat_seconds: float = 60.0
+    worker_metrics_port: int = 9091
+
     # Tracing is off unless an OTLP endpoint is configured.
     otel_exporter_otlp_endpoint: str = ""
 

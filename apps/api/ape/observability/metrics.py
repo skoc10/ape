@@ -33,6 +33,31 @@ class Metrics:
             "Open agent WebSocket sessions.",
             registry=self.registry,
         )
+        self.audit_runs = Counter(
+            "ape_audit_runs_total",
+            "Audit runs finished by the worker, by final status.",
+            ["status"],
+            registry=self.registry,
+        )
+        self.audit_stage_seconds = Histogram(
+            "ape_audit_stage_seconds",
+            "Time spent per pipeline stage.",
+            ["stage"],
+            buckets=(0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600),
+            registry=self.registry,
+        )
+        self.llm_tokens = Counter(
+            "ape_llm_tokens_total",
+            "LLM tokens used, by model and direction (input or output).",
+            ["model", "direction"],
+            registry=self.registry,
+        )
+        self.pdf_render_seconds = Histogram(
+            "ape_pdf_render_seconds",
+            "Time to render a report PDF.",
+            buckets=(0.5, 1, 2.5, 5, 10, 30, 60),
+            registry=self.registry,
+        )
         self.masking_redactions = Counter(
             "ape_masking_redactions_total",
             "Values replaced by a placeholder, by detector.",
