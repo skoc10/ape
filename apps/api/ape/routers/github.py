@@ -8,7 +8,6 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
-from ape.core.config import Settings
 from ape.core.db import Database
 from ape.core.deps import CurrentPrincipal
 from ape.core.tenancy import Principal
@@ -221,7 +220,6 @@ async def open_pull_request(
 ) -> PullRequestOut:
     """Opens the fix pull request. Only ever on an explicit request from an owner or admin."""
     _require_manager(principal)
-    settings: Settings = request.app.state.settings
     async with db.tenant(principal.org_id) as tc:
         run = await audit_runs.get(tc, run_id)
         if run is None:
