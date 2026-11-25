@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "type": "collect_chunk",
+  "id": "01JDKX5N8Q4V7YH2M3R6T9WZA5",
+  "ts": "2026-11-25T05:00:00Z",
+  "payload": {
+    "run_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "seq": 0,
+    "kind": "Pod",
+    "count": 0,
+    "data": "H4sIAAAAAAAAA4uOBQApu0wNAgAAAA=="
+  }
+}

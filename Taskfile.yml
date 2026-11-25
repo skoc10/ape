@@ -139,9 +139,26 @@ tasks:
       - cd agent && go build ./...
 
   gen:
-    desc: Generate Go and Python types from packages/protocol (task 2.1)
+    desc: Generate Go and Python types from packages/protocol (generators are pinned)
+    vars:
+      SCHEMA: packages/protocol/protocol.schema.json
+      PY_OUT: apps/api/ape/gateway/protocol_gen.py
     cmds:
-      - echo "protocol codegen lands in task 2.1"
+      - cd agent && go run github.com/atombender/go-jsonschema@v0.24.1 -p protocol --only-models -o internal/protocol/types_gen.go ../{{.SCHEMA}}
+      - >-
+        uvx --from datamodel-code-generator==0.102.0 datamodel-codegen
+        --input {{.SCHEMA}} --input-file-type jsonschema --output {{.PY_OUT}}
+        --output-model-type pydantic_v2.BaseModel --target-python-version 3.12
+        --use-standard-collections --use-union-operator --disable-timestamp
+        --use-schema-description --field-constraints --collapse-root-models
+        --custom-file-header '# Generated from packages/protocol/protocol.schema.json by "task gen". DO NOT EDIT.'
+      - cd apps/api && uv run ruff format ape/gateway/protocol_gen.py && uv run ruff check --fix --quiet ape/gateway/protocol_gen.py
+
+  gen:check:
+    desc: Fail if generated protocol code is out of date
+    cmds:
+      - task: gen
+      - git diff --exit-code -- agent/internal/protocol/types_gen.go apps/api/ape/gateway/protocol_gen.py
 
   # --- kubernetes -----------------------------------------------------------
   kind-up:

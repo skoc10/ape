@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "type": "ping",
+  "id": "01JDKX5N8Q4V7YH2M3R6T9WZA2",
+  "ts": "2026-11-25T05:00:00Z",
+  "payload": {
+    "health": {
+      "last_collect_seconds": 4.2,
+      "error_count": 0
+    }
+  }
+}

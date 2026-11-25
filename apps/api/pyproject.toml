@@ -47,6 +47,8 @@ select = ["E", "F", "I", "B", "UP", "S", "ASYNC", "SIM", "RUF"]
 "tests/**" = ["S101", "S105", "S106"]
 # Repositories interpolate only module-level column lists; every value is a bound parameter.
 "ape/repos/**" = ["S608"]
+# Generated code: descriptions come verbatim from the JSON Schema.
+"ape/gateway/protocol_gen.py" = ["E501", "UP"]
 
 [tool.mypy]
 python_version = "3.12"

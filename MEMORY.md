@@ -89,6 +89,19 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
   yeniden doğrular, id'ler UUID değilse API'ye gitmez. Token iptali iki tıklamayla onaylanır.
 - **Helm komutu:** `AGENT_ENDPOINT` ve `AGENT_CHART_REF` ortam değişkenlerinden üretilir.
 
+### 2.1 Protokol şeması ve kod üretimi (2026-11-25)
+
+- **Tek dosya:** `packages/protocol/protocol.schema.json` içinde `$defs` olarak zarf ve sekiz mesaj
+  tipi (`ping` ve `pong` ayrı sayıldı). Üreticiler sabit sürümlü: go-jsonschema v0.24.1 ve
+  datamodel-code-generator 0.102.0; `task gen` üretir, `task gen:check` ve CI güncelliği denetler.
+- **Zarf elle yazıldı:** payload tipi `type` alanına göre seçildiği için çözümleme
+  `agent/internal/protocol/frame.go` ve `apps/api/ape/gateway/protocol.py` içinde. İki taraf da
+  bilinmeyen alanı reddeder ve hata mesajında payload içeriğini yansıtmaz.
+- **Ortak örnekler:** `packages/protocol/examples/*.json` hem Go hem Python testlerinde çözülüyor.
+- **`collect_done.sha256`:** tüm parçaların gzip baytlarının `seq` sırasıyla birleşiminin özeti.
+- Dizi öğelerinde `maxLength` kullanılmadı (üretilen Python tipleri sade kalsın diye); toplam
+  çerçeve boyutu zaten 512 KiB ile sınırlı.
+
 ## Kullanıcı Aksiyonu Gerekenler
 
 - **Control Plane alan adı (1.5).** Sihirbazdaki helm komutu şu an `ws://localhost:8000/v1/agent`
@@ -108,7 +121,8 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
 
 Bağımsız reviewer `6381df9` üzerinde nihai hükmü verdi: kritik veya orta bulgu yok, Hafta 2
 onaylandı. Son düşük bulgu (ayrılmış slug'ın `organization/update` ile verilebilmesi)
-`beforeUpdateOrganization` hook'u ve uçtan uca testle kapatıldı.
+`beforeUpdateOrganization` hook'u ve uçtan uca testle kapatıldı (D4b; kullanıcı bunu v1.1
+backlog'una almak istemişti ama düzeltme o mesajdan önce push edilmişti, `2adaa3a`).
 
 ### Hafta 1 ara rapor (1.1-1.4)
 
