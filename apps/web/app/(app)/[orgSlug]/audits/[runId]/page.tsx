@@ -6,7 +6,15 @@ import { FindingFilters } from "@/components/finding-filters";
 import { SeverityBadge } from "@/components/severity-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { CATEGORIES, SEVERITIES, getAudit, listFindings, type Category, type Severity } from "@/lib/clusters";
+import {
+  CATEGORIES,
+  SEVERITIES,
+  getAudit,
+  getReportHtml,
+  listFindings,
+  type Category,
+  type Severity,
+} from "@/lib/clusters";
 import { requireOrganization } from "@/lib/session";
 
 const IN_PROGRESS = new Set(["queued", "collecting", "collected", "analyzing", "reporting"]);
@@ -35,6 +43,7 @@ export default async function Page({ params, searchParams }: PageProps<"/[orgSlu
   const severity = pick<Severity>(query.severity, SEVERITIES);
   const category = pick<Category>(query.category, CATEGORIES);
   const findings = await listFindings(organization.id, audit.id, { severity, category });
+  const reportHtml = audit.status === "completed" ? await getReportHtml(organization.id, audit.id) : null;
   const counts = audit.stats.findings;
   const active = IN_PROGRESS.has(audit.status);
 
@@ -71,7 +80,10 @@ export default async function Page({ params, searchParams }: PageProps<"/[orgSlu
       {counts && (
         <Card>
           <CardHeader>
-            <CardTitle>{counts.total} findings</CardTitle>
+            <CardTitle>
+              {audit.score !== null && <span data-testid="audit-score">Score {audit.score} / 100 &middot; </span>}
+              {counts.total} findings
+            </CardTitle>
             <CardDescription>{audit.stats.summary}</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
@@ -94,6 +106,30 @@ export default async function Page({ params, searchParams }: PageProps<"/[orgSlu
             )}
           </CardContent>
         </Card>
+      )}
+
+      {reportHtml && (
+        <section className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold">Report</h2>
+            {audit.has_report && (
+              <a
+                href={`/${orgSlug}/audits/${audit.id}/report.pdf`}
+                className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground"
+              >
+                Download PDF
+              </a>
+            )}
+          </div>
+          {/* sandbox="" : no scripts, no forms, no navigation, an opaque origin. The report text
+              comes from cluster data and an LLM, so it is displayed as an inert document. */}
+          <iframe
+            title="Report preview"
+            sandbox=""
+            srcDoc={reportHtml}
+            className="h-[640px] w-full rounded-lg border bg-white"
+          />
+        </section>
       )}
 
       {audit.status === "completed" && (

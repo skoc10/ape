@@ -420,6 +420,11 @@ def test_system_namespaces_are_skipped_by_default() -> None:
     ]
 
 
+def test_the_audit_agents_own_namespace_is_not_reported() -> None:
+    agent = deployment(name="ape-agent", namespace="ape-system", replicas=1, livenessProbe=None)
+    assert run_rules([namespace("ape-system"), agent]) == []
+
+
 def test_fingerprints_are_stable_and_distinct() -> None:
     bad = deployment(securityContext={"privileged": True})
     first, second = run_rules([bad]), run_rules([bad])

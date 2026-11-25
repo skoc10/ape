@@ -3,7 +3,7 @@ from typing import Annotated, Any, Literal
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
 
 from ape.core.db import Database
@@ -11,6 +11,7 @@ from ape.core.deps import CurrentPrincipal
 from ape.gateway.endpoint import AuditNotStartable, start_collection
 from ape.gateway.sessions import SessionRegistry
 from ape.repos import audit_runs, clusters, findings
+from ape.storage import ObjectStore
 
 router = APIRouter(prefix="/v1", tags=["audits"])
 log = structlog.get_logger(__name__)
@@ -127,3 +128,58 @@ async def list_findings(
             raise HTTPException(status.HTTP_404_NOT_FOUND, "audit not found")
         rows = await findings.list_for_run(tc, run_id, severity=severity, category=category)
     return [FindingOut.model_validate(r) for r in rows]
+
+
+# The report is the tenant's own document, but its text comes from an LLM and from cluster
+# data. It is served so that a browser will not run or load anything from it.
+_REPORT_HEADERS = {
+    "Content-Security-Policy": (
+        "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; "
+        "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    ),
+    "X-Content-Type-Options": "nosniff",
+    "Cache-Control": "private, no-store",
+    "Referrer-Policy": "no-referrer",
+}
+
+
+class ReportLink(BaseModel):
+    url: str
+    expires_in: int
+
+
+async def _own_run(db: Database, org_id: str, run_id: UUID) -> dict[str, Any]:
+    async with db.tenant(org_id) as tc:
+        row = await audit_runs.get(tc, run_id)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "audit not found")
+    return row
+
+
+@router.get("/audits/{run_id}/report")
+async def get_report_html(
+    request: Request, run_id: UUID, principal: CurrentPrincipal, db: Db
+) -> Response:
+    """The report as self-contained HTML, for the sandboxed preview in the panel."""
+    await _own_run(db, principal.org_id, run_id)
+    store: ObjectStore = request.app.state.object_store
+    html = await store.get_report(principal.org_id, run_id, "html")
+    if html is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "report not available yet")
+    return Response(html, media_type="text/html; charset=utf-8", headers=_REPORT_HEADERS)
+
+
+@router.get("/audits/{run_id}/report/pdf")
+async def get_report_pdf_link(
+    request: Request, run_id: UUID, principal: CurrentPrincipal, db: Db
+) -> ReportLink:
+    """A download link that is valid for five minutes, issued after the tenant check."""
+    row = await _own_run(db, principal.org_id, run_id)
+    if not row["has_report"]:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "report not available yet")
+    store: ObjectStore = request.app.state.object_store
+    expires_in = 300
+    url = await store.presign_report(
+        principal.org_id, run_id, "pdf", filename=f"audit-{run_id}.pdf", expires_in=expires_in
+    )
+    return ReportLink(url=url, expires_in=expires_in)

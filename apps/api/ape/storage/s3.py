@@ -50,14 +50,28 @@ class ObjectStore:
     def __init__(self, settings: Settings) -> None:
         self._snapshots = settings.s3_bucket_snapshots
         self._reports = settings.s3_bucket_reports
-        self._client: Any = boto3.client(
+        self._client: Any = self._make_client(settings, settings.s3_endpoint_url)
+        # Presigned URLs embed the host they were signed for, so links handed to a
+        # browser are signed against the public address.
+        self._public_client: Any = (
+            self._make_client(settings, settings.s3_public_endpoint_url)
+            if settings.s3_public_endpoint_url
+            else self._client
+        )
+
+    @staticmethod
+    def _make_client(settings: Settings, endpoint_url: str) -> Any:
+        return boto3.client(
             "s3",
-            endpoint_url=settings.s3_endpoint_url or None,
+            endpoint_url=endpoint_url or None,
             region_name=settings.s3_region,
             aws_access_key_id=settings.s3_access_key,
             aws_secret_access_key=settings.s3_secret_key,
             config=Config(
                 s3={"addressing_style": "path"},
+                # SigV4 everywhere: the legacy signature breaks presigned links that carry
+                # response headers on S3-compatible servers.
+                signature_version="s3v4",
                 retries={"max_attempts": 3, "mode": "standard"},
                 # Plain checksums: not every S3-compatible server accepts the newer trailers.
                 request_checksum_calculation="when_required",
@@ -143,7 +157,7 @@ class ObjectStore:
     ) -> str:
         """A short-lived download link, created only after the caller's tenant was checked."""
         url: str = await asyncio.to_thread(
-            self._client.generate_presigned_url,
+            self._public_client.generate_presigned_url,
             "get_object",
             Params={
                 "Bucket": self._reports,

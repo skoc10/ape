@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kubernetes audit report: {{ cluster_name }}</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 20mm 16mm;
+          @bottom-right { content: counter(page) " / " counter(pages); font-size: 9pt; color: #6b7280; }
+          @bottom-left { content: "{{ company_name | css_string }}"; font-size: 9pt; color: #6b7280; } }
+  * { box-sizing: border-box; }
+  body { font-family: "DejaVu Sans", "Helvetica Neue", Arial, sans-serif; font-size: 10.5pt;
+         line-height: 1.45; color: #111827; margin: 0; padding: 24px; max-width: 900px; }
+  @media print { body { padding: 0; max-width: none; } }
+  h1 { font-size: 22pt; margin: 0 0 4px; }
+  h2 { font-size: 14pt; margin: 28px 0 10px; padding-bottom: 4px; border-bottom: 2px solid {{ color }};
+       break-after: avoid; }
+  h3 { font-size: 11.5pt; margin: 0 0 4px; break-after: avoid; }
+  p { margin: 0 0 8px; }
+  .muted { color: #6b7280; }
+  .cover { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px;
+           border-bottom: 4px solid {{ color }}; padding-bottom: 16px; }
+  .cover img { max-height: 64px; max-width: 220px; }
+  .overview { display: flex; gap: 28px; align-items: center; }
+  .counts span { display: inline-block; margin: 0 10px 6px 0; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 8.5pt;
+           font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
+  .critical { background: #b91c1c; color: #fff; } .high { background: #ea580c; color: #fff; }
+  .medium { background: #facc15; color: #111; } .low { background: #bae6fd; color: #0c4a6e; }
+  .info { background: #e5e7eb; color: #374151; }
+  .tag { display: inline-block; padding: 1px 6px; border: 1px solid #d1d5db; border-radius: 4px;
+         font-size: 8.5pt; color: #374151; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 9.5pt; }
+  th { text-align: left; border-bottom: 1.5px solid #9ca3af; padding: 5px 6px; }
+  td { border-bottom: 1px solid #e5e7eb; padding: 5px 6px; vertical-align: top;
+       overflow-wrap: anywhere; word-break: break-word; }
+  tr { break-inside: avoid; }
+  .finding { border: 1px solid #e5e7eb; border-left: 4px solid {{ color }}; border-radius: 6px;
+             padding: 12px 14px; margin: 0 0 12px; break-inside: avoid; }
+  .finding .resource { font-family: "DejaVu Sans Mono", Menlo, monospace; font-size: 9pt; color: #4b5563;
+                       overflow-wrap: anywhere; }
+  .finding .text { white-space: pre-line; overflow-wrap: anywhere; }
+  pre { background: #f3f4f6; border-radius: 4px; padding: 8px 10px; font-size: 8.5pt;
+        font-family: "DejaVu Sans Mono", Menlo, monospace; white-space: pre-wrap;
+        overflow-wrap: anywhere; word-break: break-all; margin: 4px 0 0; }
+  ol { margin: 0; padding-left: 20px; }
+</style>
+</head>
+<body>
+  <header class="cover">
+    <div>
+      <h1>Kubernetes audit report</h1>
+      <p class="muted">Cluster <strong>{{ cluster_name }}</strong> &middot; {{ generated_on }}</p>
+      <p class="muted">Prepared by {{ company_name }}</p>
+    </div>
+    {% if logo_data_uri %}<img src="{{ logo_data_uri }}" alt="{{ company_name }}">{% endif %}
+  </header>
+
+  <h2>Executive summary</h2>
+  <p>{{ summary }}</p>
+
+  <h2>Score and distribution</h2>
+  <div class="overview">
+    <div>{{ score_ring | safe }}</div>
+    <div>
+      <p class="counts">
+        {% for severity in severities %}{% if severity_counts[severity] %}
+        <span><span class="badge {{ severity }}">{{ severity }}</span> {{ severity_counts[severity] }}</span>
+        {% endif %}{% endfor %}
+        {% if not findings %}<span>No findings.</span>{% endif %}
+      </p>
+      {{ category_bars | safe }}
+      {% if truncated %}<p class="muted">The inventory was truncated: a collection limit was reached.</p>{% endif %}
+    </div>
+  </div>
+
+  {% if top_risks %}
+  <h2>Top risks</h2>
+  <ol>{% for risk in top_risks %}<li>{{ risk }}</li>{% endfor %}</ol>
+  {% endif %}
+
+  {% if findings %}
+  <h2>Findings</h2>
+  <table>
+    <thead><tr><th style="width: 13%">Severity</th><th style="width: 13%">Category</th>
+      <th style="width: 34%">Finding</th><th style="width: 40%">Resource</th></tr></thead>
+    <tbody>
+    {% for f in findings %}
+      <tr><td><span class="badge {{ f.severity }}">{{ f.severity }}</span></td><td>{{ f.category }}</td>
+        <td>{{ f.title }}{% if f.recurring %} <span class="tag">recurring</span>{% endif %}</td>
+        <td>{{ f.resource }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Details and remediation</h2>
+  {% for f in findings %}
+  <section class="finding">
+    <p><span class="badge {{ f.severity }}">{{ f.severity }}</span> <span class="tag">{{ f.category }}</span>
+       <span class="tag">{{ f.rule_id }}</span>{% if f.recurring %} <span class="tag">recurring</span>{% endif %}</p>
+    <h3>{{ f.title }}</h3>
+    <p class="resource">{{ f.resource }}</p>
+    {% if f.explanation %}<p class="text">{{ f.explanation }}</p>{% endif %}
+    {% if f.remediation %}<p><strong>How to fix</strong></p><p class="text">{{ f.remediation }}</p>{% endif %}
+    {% if f.patch %}<p><strong>Proposed patch</strong></p><pre>{{ f.patch }}</pre>{% endif %}
+  </section>
+  {% endfor %}
+  {% endif %}
+</body>
+</html>

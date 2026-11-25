@@ -58,6 +58,9 @@ export type AuditRun = {
   };
   error: string | null;
   has_snapshot: boolean;
+  has_report: boolean;
+  score: number | null;
+  pr_url: string | null;
   created_at: string;
 };
 
@@ -102,6 +105,22 @@ export async function getAudit(orgId: string, runId: string): Promise<AuditRun |
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`API error ${res.status}`);
   return res.json();
+}
+
+/** The stored report as self-contained HTML, or null while it does not exist. */
+export async function getReportHtml(orgId: string, runId: string): Promise<string | null> {
+  if (!isUuid(runId)) return null;
+  const res = await apiFetch(orgId, `/v1/audits/${runId}/report`);
+  if (!res.ok) return null;
+  return res.text();
+}
+
+/** A five-minute download link for the PDF, or null when there is no PDF. */
+export async function getReportPdfUrl(orgId: string, runId: string): Promise<string | null> {
+  if (!isUuid(runId)) return null;
+  const res = await apiFetch(orgId, `/v1/audits/${runId}/report/pdf`);
+  if (!res.ok) return null;
+  return ((await res.json()) as { url: string }).url;
 }
 
 export async function listFindings(

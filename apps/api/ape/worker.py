@@ -20,6 +20,7 @@ from ape.core.config import Settings, get_settings
 from ape.core.db import Database
 from ape.observability.logging import configure_logging
 from ape.observability.metrics import Metrics
+from ape.reports.builder import Reporter
 from ape.storage import ObjectStore
 
 log = structlog.get_logger("ape.worker")
@@ -58,7 +59,11 @@ async def serve(settings: Settings) -> None:
         log.info(
             "llm_configured", provider=settings.llm_provider or "none", model=settings.llm_model
         )
-        pipeline = Pipeline(settings, db, ObjectStore(settings), metrics, enrich=analyst.enrich_run)
+        store = ObjectStore(settings)
+        reporter = Reporter(db, store, metrics)
+        pipeline = Pipeline(
+            settings, db, store, metrics, enrich=analyst.enrich_run, report=reporter.build
+        )
         await run_worker(pipeline, stop)
     finally:
         await db.close()

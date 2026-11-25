@@ -17,6 +17,8 @@ jobs:
         working-directory: apps/api
     steps:
       - uses: actions/checkout@v4
+      - name: Install WeasyPrint system libraries
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 fonts-dejavu-core
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true

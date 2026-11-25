@@ -303,6 +303,36 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
   müşterinin raporuna girer). Nesne anahtarı `{org_id}/branding/logo`, `reports` bucket'ında.
 - Panelde `/[orgSlug]/settings/branding`; logo önizlemesi API üzerinden data URI olarak gelir.
 
+### 4.2 Rapor şablonu ve skor (2026-11-25)
+
+- **Skor:** `ape/reports/scoring.toml` (critical 15, high 8, medium 3, low 1, kategori başına en
+  fazla 40). `audit_runs.score` ve `stats.score` içine yazılır.
+- **Şablon:** `ape/reports/templates/report.html.j2` (Jinja2, autoescape açık). Bölümler: yönetici
+  özeti, skor halkası ve kategori çubukları (statik SVG), ilk 5 risk, bulgu tablosu, bulgu
+  başına açıklama, düzeltme ve yama. Tek dosya: satır içi CSS, script yok, dış URL yok.
+- **Beyaz etiket:** firma adı, renk ve logo `organization_settings.branding`'den; ayar yoksa
+  nötr varsayılan ("Platform Engineering", mavi). Ürün adı raporda geçmez (testli). Ajanın kendi
+  namespace'i (`ape-system`) bu yüzden bulgulardan hariç tutulur.
+- **Sunum:** `GET /v1/audits/{id}/report` HTML'i `Content-Security-Policy: sandbox; default-src
+  'none'` ile döner; panel `sandbox=""` iframe içinde `srcDoc` olarak gösterir (rapor metni
+  cluster verisi ve LLM çıktısı içerdiği için etkisiz belge olarak ele alınır).
+
+### 4.3 WeasyPrint ile PDF (2026-11-25)
+
+- Aynı HTML, WeasyPrint 70 ile A4 PDF olur; URL fetcher yalnızca `data:` protokolüne izin verir
+  (ağ ve dosya erişimi yok, testli). PDF `{org_id}/{run_id}/report.pdf` olarak `reports`
+  bucket'ına gider, `report_key` set edilir.
+- **İndirme:** `GET /v1/audits/{id}/report/pdf` tenant kontrolünden sonra 5 dakikalık presigned URL
+  döner; panelde `/audits/{id}/report.pdf` rotası oturumu doğrulayıp oraya yönlendirir. S3 istemcisi
+  SigV4'e sabitlendi (yanıt başlıklı presigned linkler eski imzayla SeaweedFS'te 403 veriyordu).
+  Tarayıcının göreceği S3 adresi farklıysa `S3_PUBLIC_ENDPOINT_URL` (4.6).
+- **100 bulgu testi:** kırılamayan 400 karakterlik dizgilerle 100 bulguluk rapor A4'e sığıyor,
+  Python tarafı bellek tepe değeri 1 GiB'in çok altında; `ape_pdf_render_seconds` ölçüyor.
+- **PDF hatası audit'i düşürmez:** render başarısız olursa çalışma yine `completed` olur, HTML
+  rapor durur, `stats.report.pdf=false`.
+- **Sistem kütüphaneleri:** worker imajına Pango ve DejaVu fontları gerekli (CI'da apt ile);
+  yerelde `brew install pango`. macOS'ta Homebrew kütüphane yolu kod içinde eklenir.
+
 ## Kullanıcı Aksiyonu Gerekenler
 
 - **Claude API anahtarı ve ZDR onayı (3.5).** LLM zenginleştirmesini açmak için worker'a

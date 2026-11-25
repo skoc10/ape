@@ -139,3 +139,13 @@ async def fail_processing(tc: TenantConnection, run_id: UUID, *, error: str) -> 
         (error[:500], tc.org_id, run_id),
     )
     return cur.rowcount == 1
+
+
+async def set_report(
+    tc: TenantConnection, run_id: UUID, *, score: int, report_key: str | None
+) -> None:
+    await tc.conn.execute(
+        "update audit_runs set score = %s, report_key = %s, locked_at = now() "
+        "where org_id = %s and id = %s",
+        (score, report_key, tc.org_id, run_id),
+    )

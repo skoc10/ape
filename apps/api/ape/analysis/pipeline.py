@@ -39,6 +39,10 @@ class ClaimedRun:
 Enricher = Callable[[ClaimedRun, list[dict[str, Any]], list[Finding]], Awaitable[dict[str, Any]]]
 
 
+# Report stage (score, HTML, PDF; week 4). Receives the run and the stats gathered so far.
+ReportBuilder = Callable[[ClaimedRun, dict[str, Any]], Awaitable[dict[str, Any]]]
+
+
 @dataclass(slots=True)
 class Pipeline:
     settings: Settings
@@ -46,6 +50,7 @@ class Pipeline:
     store: ObjectStore
     metrics: Metrics
     enrich: Enricher | None = None
+    report: ReportBuilder | None = None
 
     async def claim(self) -> ClaimedRun | None:
         async with self.db.system() as sc:
@@ -97,13 +102,17 @@ class Pipeline:
             async with self._stage("llm", durations):
                 extra = await self.enrich(run, objects, found)
 
-        async with self._stage("report", durations), self.db.tenant(run.org_id) as tc:
-            await audit_runs.set_stage(tc, run.id, "reporting")
-            # Score, HTML and PDF are produced here from week 4 on.
+        report: dict[str, Any] = {}
+        async with self._stage("report", durations):
+            async with self.db.tenant(run.org_id) as tc:
+                await audit_runs.set_stage(tc, run.id, "reporting")
+            if self.report is not None:
+                report = await self.report(run, extra)
 
         severities = Counter(f.severity for f in found)
         return {
             **extra,
+            **report,
             "findings": {"total": len(found), **dict(sorted(severities.items()))},
             "durations": {stage: round(seconds, 3) for stage, seconds in durations.items()},
         }

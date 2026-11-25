@@ -8,7 +8,9 @@ from typing import Any
 from ape.rules.model import ResourceRef
 
 # Namespaces managed by Kubernetes itself; findings there are not the customer's to fix.
-SYSTEM_NAMESPACES = frozenset({"kube-system", "kube-public", "kube-node-lease"})
+# The audit agent's own namespace is skipped as well: it is our component, not the
+# customer's workload, and reports are white label.
+SYSTEM_NAMESPACES = frozenset({"kube-system", "kube-public", "kube-node-lease", "ape-system"})
 
 Obj = dict[str, Any]
 

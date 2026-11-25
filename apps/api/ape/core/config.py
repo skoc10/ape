@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     s3_secret_key: str = ""
     s3_bucket_snapshots: str = "snapshots"
     s3_bucket_reports: str = "reports"
+    # Address browsers use for presigned download links, when it differs from the
+    # in-cluster S3_ENDPOINT_URL (for example https://files.example.com).
+    s3_public_endpoint_url: str = ""
 
     # Master key for masking placeholders; a per-tenant key is derived from it.
     masking_key: str = ""

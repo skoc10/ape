@@ -149,4 +149,25 @@ const html = await page.text();
 assert.ok(html.includes("Privileged container") && html.includes("storefront") && html.includes("How to fix"));
 console.log("ok - the audit page lists the findings with explanations");
 
+// --- white-label report: score, sandboxed HTML preview, PDF download ---------------------
+assert.ok(Number.isInteger(audit.score) && audit.score >= 0 && audit.score < 100, `score is ${audit.score}`);
+assert.ok(html.includes('sandbox=""') && html.includes("Report preview") && html.includes("Download PDF"));
+const reportRes = await fetch(`${API}/v1/audits/${audit.id}/report`, {
+  headers: { Authorization: `Bearer ${(await web("/api/auth/token")).token}` },
+});
+assert.equal(reportRes.status, 200);
+assert.match(reportRes.headers.get("content-security-policy"), /sandbox/);
+const reportHtml = await reportRes.text();
+assert.ok(reportHtml.includes("Kubernetes audit report") && reportHtml.includes("Executive summary"));
+assert.ok(!/\bAPE\b|Autonomous Platform Engineering|ape-agent|ape-system/i.test(reportHtml), "product name in the report");
+for (const secret of planted) assert.ok(!reportHtml.includes(secret), `planted secret ${secret} in the report`);
+const pdfRedirect = await fetch(`${WEB}/e2e-${run}/audits/${audit.id}/report.pdf`, {
+  headers: { Cookie: [...cookies].map(([k, v]) => `${k}=${v}`).join("; ") },
+  redirect: "manual",
+});
+assert.equal(pdfRedirect.status, 307);
+const pdf = Buffer.from(await (await fetch(pdfRedirect.headers.get("location"))).arrayBuffer());
+assert.equal(pdf.subarray(0, 5).toString(), "%PDF-");
+console.log(`ok - report built: score ${audit.score}, HTML preview is sandboxed, PDF downloads (${Math.round(pdf.length / 1024)} KB)`);
+
 console.log("\ne2e collection test passed");
