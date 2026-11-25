@@ -117,7 +117,12 @@ class Scripted:
 
 def analyst(settings: Settings, db: Database, model: Model | None, **overrides: Any) -> Analyst:
     configured = settings.model_copy(
-        update={"llm_provider": "test" if model else "", "llm_model": "scripted", **overrides}
+        update={
+            "llm_provider": "test" if model else "",
+            "llm_model": "scripted",
+            "llm_output_mode": "tool",
+            **overrides,
+        }
     )
     return Analyst(configured, db, Metrics(), model)
 
@@ -259,7 +264,11 @@ async def run_pipeline(
 ) -> tuple[uuid.UUID, Metrics]:
     metrics = Metrics()
     configured = settings.model_copy(
-        update={"llm_provider": "test" if model else "", "llm_model": "scripted"}
+        update={
+            "llm_provider": "test" if model else "",
+            "llm_model": "scripted",
+            "llm_output_mode": "tool",
+        }
     )
     subject = Analyst(configured, db, metrics, model)
     pipeline = Pipeline(configured, db, ObjectStore(settings), metrics, enrich=subject.enrich_run)
@@ -373,3 +382,27 @@ async def test_an_unreachable_llm_falls_back_to_templates_and_the_audit_complete
 
 def test_finding_type_is_shared_with_the_rule_engine() -> None:
     assert Finding.__module__ == "ape.rules.model"
+
+
+async def test_native_structured_output_mode(settings: Settings, db: Database) -> None:
+    """The default mode asks for JSON-schema output instead of a tool call."""
+    from pydantic_ai.messages import TextPart
+
+    objects = vulnerable_objects()
+    found = run_rules(objects)[:2]
+    seen: dict[str, Any] = {}
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        seen["output_tools"] = len(info.output_tools)
+        items = findings_in_prompt(messages)
+        body = {"executive_summary": "ok", "top_risks": [], "findings": [answer(i) for i in items]}
+        return ModelResponse(parts=[TextPart(json.dumps(body))])
+
+    assert settings.llm_output_mode == "native"
+    subject = analyst(settings, db, FunctionModel(respond), llm_output_mode="native")
+    result = await subject.analyse("org_x", objects, found)
+    assert len(result.enriched) == 2
+    assert seen["output_tools"] == 0
+
+    with pytest.raises(ValueError, match="unknown LLM_OUTPUT_MODE"):
+        analyst(settings, db, FunctionModel(respond), llm_output_mode="telepathy")

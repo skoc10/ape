@@ -17,7 +17,7 @@ from typing import Any
 
 import structlog
 import yaml
-from pydantic_ai import Agent
+from pydantic_ai import Agent, NativeOutput
 from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.models import Model
 from pydantic_ai.usage import UsageLimits
@@ -103,11 +103,18 @@ class Analyst:
         self._db = db
         self._metrics = metrics
         self._model = model
-        self._agent: Agent[None, AuditAnalysis] | None = (
-            None
-            if model is None
-            else Agent(model, output_type=AuditAnalysis, instructions=SYSTEM_PROMPT, retries=2)
-        )
+        self._agent: Agent[None, AuditAnalysis] | None = None
+        if model is not None:
+            if settings.llm_output_mode not in {"native", "tool"}:
+                raise ValueError(f"unknown LLM_OUTPUT_MODE: {settings.llm_output_mode}")
+            output_type: Any = (
+                NativeOutput(AuditAnalysis)
+                if settings.llm_output_mode == "native"
+                else AuditAnalysis
+            )
+            self._agent = Agent(
+                model, output_type=output_type, instructions=SYSTEM_PROMPT, retries=2
+            )
 
     # --- the only function that talks to the model -----------------------------------
 

@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     llm_model: str = "claude-sonnet-5-5"
     llm_base_url: str = ""
     llm_api_key: str = ""
+    # How the structured answer is requested: "native" uses the provider's JSON-schema
+    # structured output (reliable on small local models, and needs no forced tool call,
+    # which current Claude models reject); "tool" uses a tool call instead.
+    llm_output_mode: str = "native"
     llm_batch_size: int = 25
     llm_max_tokens_per_run: int = 300_000
     llm_request_timeout_seconds: float = 180.0

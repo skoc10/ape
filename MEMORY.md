@@ -273,8 +273,15 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
   ayrı sütun olmadığı için `explanation` metnine eklenir.
 - **Prompt injection:** manifest içeriği "veri" olarak işaretli; asıl koruma çıktı doğrulaması ve
   PR'ın insan onayından geçmesi.
-- **Doğrulanamayan:** gerçek Claude çağrısı (bu ortamda API anahtarı yok). Kod yolu betikli
-  modellerle ve yerel Ollama ile sınandı. `task eval` (iki modelin altın çıktı karşılaştırması)
+- **Çıktı modu `LLM_OUTPUT_MODE=native` (varsayılan):** sağlayıcının JSON şemalı yapılandırılmış
+  çıktısı kullanılır. Plandaki tool calling yolu (`tool`) duruyor ama varsayılan değil: yerel
+  küçük modeller (qwen2.5 1.5b ve 3b) tool çağrısı üretmeyip boş döndü, `native` ile 3b modeli
+  geçerli çıktı verdi; ayrıca güncel Claude modelleri zorlanmış tool seçimini reddediyor.
+- **Yerel model denemesi (Ollama, Compose `--profile llm`):** `qwen2.5:3b` ile aynı kod, yalnızca
+  ortam değişkenleri değiştirilerek 2 bulguyu 63 sn'de zenginleştirdi (CPU, Colima). 1.5b modeli
+  şemayı tutturamadı ve beklenen şekilde şablon metne düşüldü.
+- **Doğrulanamayan:** gerçek Claude çağrısı (bu ortamda API anahtarı yok); o yol yalnızca betikli
+  modellerle sınandı. `task eval` (iki modelin altın çıktı karşılaştırması)
   henüz yok, backlog.
 
 ### 3.6 Bulgu ekranı (2026-11-25)

@@ -55,7 +55,7 @@ services:
 
   # Optional local LLM (docker compose --profile llm up -d ollama). Used to prove that the
   # analysis code runs unchanged against an OpenAI-compatible server:
-  #   LLM_PROVIDER=openai_compatible LLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=qwen2.5:1.5b
+  #   LLM_PROVIDER=openai_compatible LLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=qwen2.5:3b
   ollama:
     image: ollama/ollama:0.40.18
     profiles: ["llm"]
