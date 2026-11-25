@@ -102,6 +102,21 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
 - Dizi öğelerinde `maxLength` kullanılmadı (üretilen Python tipleri sade kalsın diye); toplam
   çerçeve boyutu zaten 512 KiB ile sınırlı.
 
+### 2.2 WebSocket gateway (2026-11-25)
+
+- **Kimlik:** `Authorization: Bearer ape_...`; bağlantı önce kabul edilir, token geçersizse 4401
+  ile kapatılır (ajan düz HTTP 403 yerine anlamlı kapanış kodu görsün diye). Oturumun
+  `(org_id, cluster_id)` çifti token'dan gelir ve değişmez; mesajlarda tenant alanı yoktur.
+- **Kapanış kodları:** 4400 protokol hatası, 4401 yetkisiz/iptal, 4408 hello veya heartbeat
+  zaman aşımı, 4409 aynı cluster için yeni bağlantı eskisinin yerini aldı.
+- **Heartbeat:** ajan 30 sn'de bir `ping` yollar, gateway `pong` döner; 90 sn sessizlikte 4408.
+  Her ping'de token yeniden çözülür (iptal ve süre dolumu en geç 30 sn'de etkili); iptal ucu
+  ayrıca açık oturumu anında kapatır.
+- **Durum:** `connected` değeri yalnızca `last_seen_at` son 90 sn içindeyse geçerli sayılır
+  (API süreci ölürse cluster kendiliğinden `offline` okunur; RLS yüzünden toplu güncelleme yok).
+- **Metrikler:** `ape_agent_sessions`, `ape_agent_messages_total{type,direction}`.
+- Oturum kaydı bellek içi; plan gereği tek `api` instance'ı varsayılıyor.
+
 ## Kullanıcı Aksiyonu Gerekenler
 
 - **Control Plane alan adı (1.5).** Sihirbazdaki helm komutu şu an `ws://localhost:8000/v1/agent`

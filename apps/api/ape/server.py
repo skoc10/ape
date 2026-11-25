@@ -10,6 +10,8 @@ from ape.core.auth import JWKSCache, JWKSFetcher, TokenVerifier, http_jwks_fetch
 from ape.core.config import Settings, get_settings
 from ape.core.db import Database
 from ape.core.tenancy import MembershipCache
+from ape.gateway import endpoint as agent_endpoint
+from ape.gateway.sessions import SessionRegistry
 from ape.observability.logging import configure_logging
 from ape.observability.metrics import Metrics, install_metrics
 from ape.observability.tracing import build_tracer_provider, instrument_app
@@ -47,11 +49,14 @@ def create_app(
 
     metrics = Metrics()
     app.state.metrics = metrics
+    app.state.settings = settings
+    app.state.agent_sessions = SessionRegistry()
     install_metrics(app, metrics)
 
     app.include_router(health.router)
     app.include_router(me.router)
     app.include_router(clusters.router)
+    app.include_router(agent_endpoint.router)
 
     tracer_provider = build_tracer_provider(
         settings.service_name, settings.otel_exporter_otlp_endpoint

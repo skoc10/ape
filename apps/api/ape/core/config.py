@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     auth_audience: str = "ape-api"
     membership_cache_ttl_seconds: float = 60.0
 
+    # Agent gateway (protocol section 3 of mvp-plan.md).
+    agent_heartbeat_seconds: int = 30
+    agent_hello_timeout_seconds: float = 10.0
+    agent_max_pods: int = 5000
+    agent_max_compressed_bytes: int = 50 * 1024 * 1024
+
     # Tracing is off unless an OTLP endpoint is configured.
     otel_exporter_otlp_endpoint: str = ""
 

@@ -5,7 +5,17 @@ from psycopg import errors
 
 from ape.core.db import TenantConnection
 
-_COLUMNS = "id, name, status, k8s_version, agent_version, last_seen_at, created_at"
+# How long a cluster stays "connected" without a heartbeat (3 missed 30 s intervals).
+STALE_AFTER_SECONDS = 90
+
+# The stored status is only trusted while heartbeats keep arriving. If the API
+# process dies it cannot mark its agents offline, so staleness decides instead.
+_STATUS = (
+    "case when status = 'connected' and "
+    f"(last_seen_at is null or last_seen_at < now() - interval '{STALE_AFTER_SECONDS} seconds') "
+    "then 'offline' else status end as status"
+)
+_COLUMNS = f"id, name, {_STATUS}, k8s_version, agent_version, last_seen_at, created_at"
 
 
 class ClusterNameTaken(Exception):
@@ -41,3 +51,31 @@ async def get(tc: TenantConnection, cluster_id: UUID) -> dict[str, Any] | None:
         (tc.org_id, cluster_id),
     )
     return await cur.fetchone()
+
+
+async def mark_connected(
+    tc: TenantConnection, cluster_id: UUID, *, k8s_version: str, agent_version: str
+) -> bool:
+    cur = await tc.conn.execute(
+        "update clusters set status = 'connected', k8s_version = %s, agent_version = %s, "
+        "last_seen_at = now() where org_id = %s and id = %s",
+        (k8s_version, agent_version, tc.org_id, cluster_id),
+    )
+    return cur.rowcount == 1
+
+
+async def touch(tc: TenantConnection, cluster_id: UUID) -> None:
+    """Heartbeat: the agent is still there."""
+    await tc.conn.execute(
+        "update clusters set status = 'connected', last_seen_at = now() "
+        "where org_id = %s and id = %s",
+        (tc.org_id, cluster_id),
+    )
+
+
+async def mark_offline(tc: TenantConnection, cluster_id: UUID) -> None:
+    await tc.conn.execute(
+        "update clusters set status = 'offline' "
+        "where org_id = %s and id = %s and status = 'connected'",
+        (tc.org_id, cluster_id),
+    )

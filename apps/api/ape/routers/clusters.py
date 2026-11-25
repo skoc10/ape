@@ -10,6 +10,7 @@ from ape.core.db import Database
 from ape.core.deps import CurrentPrincipal
 from ape.core.tenancy import Principal
 from ape.core.tokens import generate_agent_token
+from ape.gateway.endpoint import revalidate
 from ape.repos import agent_tokens, clusters
 
 router = APIRouter(prefix="/v1/clusters", tags=["clusters"])
@@ -146,7 +147,7 @@ async def create_token(
 
 @router.delete("/{cluster_id}/tokens/{token_id}")
 async def revoke_token(
-    cluster_id: UUID, token_id: UUID, principal: CurrentPrincipal, db: Db
+    request: Request, cluster_id: UUID, token_id: UUID, principal: CurrentPrincipal, db: Db
 ) -> TokenOut:
     _require_manager(principal)
     async with db.tenant(principal.org_id) as tc:
@@ -154,4 +155,6 @@ async def revoke_token(
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "token not found")
     log.info("agent_token_revoked", cluster_id=str(cluster_id), token_id=str(token_id))
+    # If an agent is connected with this token, drop it now (close code 4401).
+    await revalidate(db, request.app.state.agent_sessions, cluster_id)
     return TokenOut.model_validate(row)

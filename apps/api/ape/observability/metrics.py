@@ -4,7 +4,14 @@ import time
 
 import structlog
 from fastapi import FastAPI, Request, Response
-from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Histogram, generate_latest
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    CollectorRegistry,
+    Counter,
+    Gauge,
+    Histogram,
+    generate_latest,
+)
 from starlette.middleware.base import RequestResponseEndpoint
 
 log = structlog.get_logger("ape.http")
@@ -19,6 +26,17 @@ class Metrics:
             "ape_http_request_duration_seconds",
             "HTTP request latency by method, route template and status code.",
             ["method", "route", "status"],
+            registry=self.registry,
+        )
+        self.agent_sessions = Gauge(
+            "ape_agent_sessions",
+            "Open agent WebSocket sessions.",
+            registry=self.registry,
+        )
+        self.agent_messages = Counter(
+            "ape_agent_messages_total",
+            "Agent protocol messages by type and direction (in: from agent, out: to agent).",
+            ["type", "direction"],
             registry=self.registry,
         )
 
