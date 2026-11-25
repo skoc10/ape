@@ -216,6 +216,26 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
   değil, test anında `fakes.py` içinde sabit tohumdan üretilir (repo secret-scanner'a takılmaz).
   Testler: hiçbir ekili sır çıktıda yok, aynı girdi aynı çıktı, beş ailenin hepsi tetikleniyor.
 
+### 3.3 Kural motoru (2026-11-25)
+
+- **`ape/rules`:** 15 kural saf fonksiyon olarak (`engine.py`), kural metinleri ve varsayılan
+  önem dereceleri `model.py` içindeki `RULES` tablosunda (LLM kapalıyken kullanılan şablon
+  açıklama ve düzeltme metinleri de burada).
+- **Tek bulgu, sahibinde:** bir controller'a ait pod'lar ayrıca raporlanmaz; bulgu Deployment,
+  StatefulSet, DaemonSet, Job, CronJob ya da sahipsiz Pod üzerinde ve (kural, kaynak) başına bir
+  kez çıkar. `kube-system`, `kube-public`, `kube-node-lease` varsayılan olarak atlanır.
+- **Kural yorumları (plan ayrıntı vermiyordu):** SEC-003 `runAsNonRoot` yoksa ve uid belirtilmemişse
+  ya da 0 ise; SEC-005 etiketsiz ya da `:latest` (digest varsa geçerli); RBAC-001/004 yerleşik
+  (`system:`, `cluster-admin`, `admin`, `edit`, `view`) rolleri atlar; RBAC-004 yalnızca açıkça
+  `secrets` yazan kuralları sayar (`*` RBAC-001'in işi); NET-001 yalnızca iş yükü olan
+  namespace'ler; COST-001 `requests.cpu`, `requests.memory`, `limits.memory`; COST-002 istek en az
+  100m ve kullanımın 3 katından fazlaysa; REL-001 Job ve CronJob için aranmaz; REL-002 tek replika
+  ve eşleşen PDB yoksa.
+- **Fingerprint:** `sha256(rule_id, kind, namespace, name)`. "Tekrarlayan" işareti saklanmaz,
+  okuma sırasında hesaplanır: aynı cluster'ın daha eski bir çalışmasında aynı fingerprint var mı.
+- **Doğrulama:** her kural için pozitif ve negatif test; kötü manifest seti tam olarak
+  `expected.yaml`'daki bulguları üretiyor, `clean-app` temiz; maskeli sette sonuç aynı.
+
 ## Kullanıcı Aksiyonu Gerekenler
 
 - **`MASKING_KEY` (prod).** `.env.example` içindeki değer yalnızca yerel içindir; prod için

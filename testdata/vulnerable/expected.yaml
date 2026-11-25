@@ -16,8 +16,7 @@ NET-002:                                                        # exposed outsid
   - Service/vuln-shop/storefront-public
   - Service/vuln-shop/orders-db-nodeport
 COST-001: [Deployment/vuln-shop/storefront]                     # no requests or limits
-REL-001:                                                        # missing probes
+REL-001:                                                        # missing probes (not for batch jobs)
   - Deployment/vuln-shop/storefront
   - StatefulSet/vuln-shop/orders-db
-  - CronJob/vuln-batch/nightly-export
 REL-002: [Deployment/vuln-shop/storefront]                      # single replica, no PDB
