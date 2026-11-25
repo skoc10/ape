@@ -24,3 +24,26 @@ export async function getLogoDataUri(orgId: string): Promise<string | null> {
   if (type !== "image/png" && type !== "image/jpeg") return null;
   return `data:${type};base64,${Buffer.from(await res.arrayBuffer()).toString("base64")}`;
 }
+
+export type GitHubStatus = {
+  configured: boolean;
+  connected: boolean;
+  repo: string | null;
+  manifest_path: string | null;
+  install_url: string | null;
+  can_manage: boolean;
+};
+
+export type GitHubRepo = { full_name: string; default_branch: string; private: boolean };
+
+export async function getGitHubStatus(orgId: string): Promise<GitHubStatus> {
+  const res = await apiFetch(orgId, "/v1/settings/github");
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  return res.json();
+}
+
+export async function listGitHubRepos(orgId: string): Promise<GitHubRepo[]> {
+  const res = await apiFetch(orgId, "/v1/settings/github/repos");
+  if (!res.ok) return [];
+  return res.json();
+}

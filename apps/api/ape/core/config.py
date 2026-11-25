@@ -42,6 +42,29 @@ class Settings(BaseSettings):
     # Master key for masking placeholders; a per-tenant key is derived from it.
     masking_key: str = ""
 
+    # GitHub App (pull requests with fixes). All empty = the feature is switched off.
+    github_app_id: str = ""
+    github_app_slug: str = ""
+    github_app_private_key: str = ""  # PEM; literal "\\n" sequences are accepted
+    github_app_client_id: str = ""
+    github_app_client_secret: str = ""
+    github_api_url: str = "https://api.github.com"
+    github_web_url: str = "https://github.com"
+    # Public address of the panel, used for links in pull request descriptions.
+    public_web_url: str = ""
+
+    @property
+    def github_configured(self) -> bool:
+        return all(
+            [
+                self.github_app_id,
+                self.github_app_slug,
+                self.github_app_private_key,
+                self.github_app_client_id,
+                self.github_app_client_secret,
+            ]
+        )
+
     # LLM enrichment. Empty LLM_PROVIDER switches it off: reports are then built from the
     # rule engine and template texts only. "anthropic" talks to Claude (requires ZDR for
     # customer data); "openai_compatible" talks to vLLM, Ollama, LiteLLM or OpenAI through

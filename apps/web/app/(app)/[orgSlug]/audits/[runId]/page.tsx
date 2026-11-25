@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { AutoRefresh } from "@/components/auto-refresh";
 import { FindingFilters } from "@/components/finding-filters";
+import { PullRequestButton } from "@/components/pull-request-button";
 import { SeverityBadge } from "@/components/severity-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -106,6 +107,26 @@ export default async function Page({ params, searchParams }: PageProps<"/[orgSlu
             )}
           </CardContent>
         </Card>
+      )}
+
+      {audit.status === "completed" && (audit.pr_url || findings.some((f) => f.patch)) && (
+        <section className="flex flex-wrap items-center gap-3">
+          {audit.pr_url ? (
+            // The URL comes from GitHub through our API; only https links are rendered.
+            audit.pr_url.startsWith("https://") && (
+              <a href={audit.pr_url} target="_blank" rel="noreferrer noopener" className="text-sm font-medium underline">
+                View the pull request
+              </a>
+            )
+          ) : (
+            <>
+              <PullRequestButton orgSlug={orgSlug} runId={audit.id} />
+              <span className="text-sm text-muted-foreground">
+                Proposes the patches below in the connected repository. Nothing is applied to the cluster.
+              </span>
+            </>
+          )}
+        </section>
       )}
 
       {reportHtml && (

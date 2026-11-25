@@ -46,3 +46,28 @@ export async function removeLogo(orgSlug: string): Promise<ActionResult> {
   revalidatePath(`/${orgSlug}/settings/branding`);
   return { ok: true };
 }
+
+export async function chooseGitHubRepo(orgSlug: string, form: FormData): Promise<ActionResult> {
+  const { organization } = await requireOrganization(orgSlug);
+  const res = await apiFetch(organization.id, "/v1/settings/github/repo", {
+    method: "PUT",
+    body: JSON.stringify({
+      repo: String(form.get("repo") ?? ""),
+      manifest_path: String(form.get("manifest_path") ?? "/"),
+    }),
+  });
+  if (!res.ok) {
+    if (res.status === 422) return { ok: false, error: "Check the repository and the manifest directory." };
+    return failure(res);
+  }
+  revalidatePath(`/${orgSlug}/settings/github`);
+  return { ok: true };
+}
+
+export async function disconnectGitHub(orgSlug: string): Promise<ActionResult> {
+  const { organization } = await requireOrganization(orgSlug);
+  const res = await apiFetch(organization.id, "/v1/settings/github", { method: "DELETE" });
+  if (!res.ok) return failure(res);
+  revalidatePath(`/${orgSlug}/settings/github`);
+  return { ok: true };
+}

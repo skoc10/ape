@@ -149,3 +149,12 @@ async def set_report(
         "where org_id = %s and id = %s",
         (score, report_key, tc.org_id, run_id),
     )
+
+
+async def set_pr_url(tc: TenantConnection, run_id: UUID, pr_url: str) -> bool:
+    """Records the pull request once; a second one for the same run is refused."""
+    cur = await tc.conn.execute(
+        "update audit_runs set pr_url = %s where org_id = %s and id = %s and pr_url is null",
+        (pr_url, tc.org_id, run_id),
+    )
+    return cur.rowcount == 1

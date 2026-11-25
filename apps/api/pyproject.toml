@@ -20,6 +20,7 @@ dependencies = [
     "pyyaml>=6",
     "jinja2>=3.1",
     "weasyprint>=62",
+    "ruamel-yaml>=0.18",
 ]
 
 [project.scripts]
@@ -59,6 +60,9 @@ select = ["E", "F", "I", "B", "UP", "S", "ASYNC", "SIM", "RUF"]
 "ape/gateway/protocol_gen.py" = ["E501", "UP"]
 # SVG markup reads better on one line per element.
 "ape/reports/charts.py" = ["E501"]
+# Long REST call signatures and Markdown sentences.
+"ape/github/app.py" = ["E501"]
+"ape/github/pull_request.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"

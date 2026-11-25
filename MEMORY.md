@@ -333,7 +333,37 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
 - **Sistem kütüphaneleri:** worker imajına Pango ve DejaVu fontları gerekli (CI'da apt ile);
   yerelde `brew install pango`. macOS'ta Homebrew kütüphane yolu kod içinde eklenir.
 
+### 4.4 GitHub App ve PR (2026-11-25)
+
+- **Kimlik bilgisi yok, mock ile geçildi:** gerçek GitHub App oluşturulmadığı için akışın tamamı
+  sahte bir GitHub'a (httpx MockTransport) karşı test edildi. `GITHUB_APP_*` boşken özellik
+  kapalı: uçlar 503 döner, panel "Not available yet" gösterir.
+- **Kurulum güvenliği (plana ek):** dönüş URL'sindeki `installation_id` saldırgan tarafından
+  değiştirilebilir. Bu yüzden (1) imzalı, 15 dakikalık, kullanıcıya ve tenant'a bağlı `state`,
+  (2) GitHub OAuth `code` ile `/user/installations` üzerinden "bu kurulum gerçekten bu GitHub
+  kullanıcısının mı" doğrulaması yapılır. Aksi halde başkasının kurulumu kendi workspace'ine
+  bağlanıp yabancı repoda PR açılabilirdi. Repo seçimi de yalnızca kurulumun kapsadığı repolardan.
+- **PR'ı worker değil `api` açıyor (plandan sapma):** iş yalnızca ağ çağrısı ve küçük YAML
+  ayrıştırma; bellek yükü yok, kullanıcı sonucu hemen görüyor ve ayrı bir kuyruk durumu
+  gerekmiyor. Yalnızca owner/admin'in açık isteğiyle (`POST /v1/audits/{id}/pr`), audit başına bir kez.
+- **Yama (`ape/github/patcher.py`):** ruamel.yaml round-trip; yorum, tırnak, sıra ve girinti korunur
+  (bayt bayt testli), çok belgeli dosyalar desteklenir. Eşleşme sırası: tam eşleşme, aynı
+  dizindeki `kustomization.yaml` namespace'i, tek adaylı `kind + name`; birden fazla aday
+  belirsizdir. Başka namespace'i açıkça yazan manifest asla yamalanmaz. Yama `kind`, `name` ve
+  `namespace` değiştiremez. Listeler `name` (ve benzeri) anahtarıyla birleştirilir.
+- **PR:** tek commit, `audit/<zaman>` dalı (plandaki `ape/audit-<tarih>` yerine: müşteri reposunda
+  ürün adı geçmesin), açıklamada özet, skor, rapor bağlantısı, her yamanın eşleşme kuralı ve
+  "To apply manually" bölümü. Bulgu metinleri Markdown tablosunu bozamaz, HTML ya da @mention
+  taşıyamaz. GitHub hata gövdeleri kullanıcıya ve loga yansıtılmaz.
+- Yamalar yalnızca LLM açıkken üretildiği için PR butonu LLM'siz kurulumda görünmez.
+
 ## Kullanıcı Aksiyonu Gerekenler
+
+- **GitHub App oluşturma (4.4).** GitHub'da bir App: izinler Contents (read/write), Pull requests
+  (read/write), Metadata (read); "Request user authorization (OAuth) during installation" açık;
+  Callback URL ve Setup URL `https://<panel-adresi>/github/callback`. Ardından `GITHUB_APP_ID`,
+  `GITHUB_APP_SLUG`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`
+  ve `PUBLIC_WEB_URL` ortam değişkenleri. Sonra gerçek bir test reposunda bir PR denenmeli.
 
 - **Claude API anahtarı ve ZDR onayı (3.5).** LLM zenginleştirmesini açmak için worker'a
   `LLM_PROVIDER=anthropic` ve `LLM_API_KEY` verilmeli; müşteri verisi gideceği için hesapta Zero

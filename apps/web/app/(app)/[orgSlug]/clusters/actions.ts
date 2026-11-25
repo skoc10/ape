@@ -73,3 +73,16 @@ export async function startAudit(orgSlug: string, clusterId: string): Promise<Si
   revalidatePath(`/${orgSlug}/clusters/${clusterId}`);
   return { ok: true };
 }
+
+export type PullRequestResult = { ok: true; url: string; applied: number; manual: number } | Failure;
+
+/** Opens the fix pull request. Only reachable from an explicit button press. */
+export async function openPullRequest(orgSlug: string, runId: string): Promise<PullRequestResult> {
+  const { organization } = await requireOrganization(orgSlug);
+  if (!isUuid(runId)) return { ok: false, error: "audit not found" };
+  const res = await apiFetch(organization.id, `/v1/audits/${runId}/pr`, { method: "POST" });
+  if (!res.ok) return { ok: false, error: await errorMessage(res) };
+  const body = (await res.json()) as { pr_url: string; applied: number; manual: number };
+  revalidatePath(`/${orgSlug}/audits/${runId}`);
+  return { ok: true, url: body.pr_url, applied: body.applied, manual: body.manual };
+}

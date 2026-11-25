@@ -12,16 +12,21 @@ from ape.core.db import Database
 from ape.core.tenancy import MembershipCache
 from ape.gateway import endpoint as agent_endpoint
 from ape.gateway.sessions import SessionRegistry
+from ape.github.app import GitHubApp
 from ape.observability.logging import configure_logging
 from ape.observability.metrics import Metrics, install_metrics
 from ape.observability.tracing import build_tracer_provider, instrument_app
 from ape.routers import audits, clusters, health, me
+from ape.routers import github as github_router
 from ape.routers import settings as settings_router
 from ape.storage import ObjectStore
 
 
 def create_app(
-    settings: Settings | None = None, *, jwks_fetcher: JWKSFetcher | None = None
+    settings: Settings | None = None,
+    *,
+    jwks_fetcher: JWKSFetcher | None = None,
+    github_transport: httpx.AsyncBaseTransport | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.service_name, settings.log_level)
@@ -33,7 +38,9 @@ def create_app(
             min_size=settings.db_pool_min_size,
             max_size=settings.db_pool_max_size,
         )
-        async with httpx.AsyncClient() as http:
+        github_http = httpx.AsyncClient(transport=github_transport, timeout=20.0)
+        app.state.github = GitHubApp(settings, github_http)
+        async with httpx.AsyncClient() as http, github_http:
             fetch = jwks_fetcher or http_jwks_fetcher(http, settings.jwks_url)
             app.state.db = db
             app.state.verifier = TokenVerifier(
@@ -61,6 +68,7 @@ def create_app(
     app.include_router(clusters.router)
     app.include_router(audits.router)
     app.include_router(settings_router.router)
+    app.include_router(github_router.router)
     app.include_router(agent_endpoint.router)
 
     tracer_provider = build_tracer_provider(
