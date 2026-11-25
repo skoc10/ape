@@ -117,7 +117,7 @@ def test_placeholders_are_typed_and_stable(masker: Masker) -> None:
     assert len(value) == len("<secret:key_name:0000>")
     assert masked["data"]["tls.crt"].startswith("prefix <secret:pem:")
     assert masked["data"]["tls.crt"].endswith("> suffix")
-    assert masker.redactions["pem"] == 1
+    assert masker.redactions["known_format"] == 1
     assert masker.redactions["key_name"] >= 6
 
 

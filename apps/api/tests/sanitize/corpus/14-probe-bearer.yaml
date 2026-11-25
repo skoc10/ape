@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Pod
+metadata: {name: probed, namespace: prod}
+spec:
+  containers:
+    - name: app
+      image: acme/app:1.0.0
+      livenessProbe:
+        exec:
+          command: ["sh", "-c", "curl -fsS -H 'Authorization: Bearer ${RANDOM_TOKEN}' localhost:8080/healthz"]

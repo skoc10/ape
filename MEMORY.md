@@ -198,6 +198,24 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
 - Kural kimlikleri: `SEC-001..005`, `RBAC-001..004`, `NET-001..002`, `COST-001..002`,
   `REL-001..002`.
 
+### 3.2 Deterministik maskelemenin tamamlanması (2026-11-25)
+
+- **Beş dedektör ailesi** (metrik etiketi): `known_format` (AWS, GCP servis hesabı, GitHub, Slack,
+  Stripe, JWT, PEM), `connection_string` (URL içindeki parola), `key_name` (hassas adlı alan,
+  env, bayrak, başlık ve metin içi `ad=değer`), `entropy`, `pii` (e-posta; dış IP isteğe bağlı,
+  varsayılan kapalı). Yer tutucudaki tür daha ayrıntılı: `<secret:aws_key:7f3a>` gibi.
+- **Entropi kuralı plandakinden bir adım dar:** 20 karakterden uzun, Shannon > 4,0 **ve** büyük
+  harf + küçük harf + rakam içeren dizgiler. Neden: Kubernetes adları kural gereği küçük harf
+  olduğu için ad, etiket ve imaj referansları yanlışlıkla maskelenmiyor (hex digest'ler zaten
+  en fazla 4,0 bit). Ayrıca `name`, `uid`, `image` gibi kimlik alanlarında entropi çalışmaz.
+- **Mevcut yer tutucular korunur:** dedektörler `<secret:...>` ve `<redacted:...>` içine bakmaz;
+  ikinci geçiş hiçbir şeyi değiştirmez (korpusta testli).
+- **`MaskedPayload`** yalnızca `Masker.mask_payload` ile oluşur; LLM fonksiyonu (3.5) başka tip
+  kabul etmeyecek.
+- **Korpus:** `tests/sanitize/corpus/` altında 30 YAML + 26 log şablonu. Sahte sırlar dosyalarda
+  değil, test anında `fakes.py` içinde sabit tohumdan üretilir (repo secret-scanner'a takılmaz).
+  Testler: hiçbir ekili sır çıktıda yok, aynı girdi aynı çıktı, beş ailenin hepsi tetikleniyor.
+
 ## Kullanıcı Aksiyonu Gerekenler
 
 - **`MASKING_KEY` (prod).** `.env.example` içindeki değer yalnızca yerel içindir; prod için

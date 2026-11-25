@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: registry-auth
+  namespace: ci
+  annotations:
+    example.com/dockerconfig: '{"auths":{"registry.example.com":{"username":"ci","password":"${DB_PASSWORD}","auth":"${BASIC_AUTH}"}}}'

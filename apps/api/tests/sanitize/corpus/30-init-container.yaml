@@ -1,0 +1,13 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata: {name: agent, namespace: monitoring}
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: register
+          image: acme/register:1.0.0
+          args: ["--api-key", "${RANDOM_TOKEN}"]
+          env: [{name: LICENSE_KEY, value: "${AWS_SECRET}"}, {name: REGISTRATION_TOKEN, value: "${API_TOKEN}"}]
+      containers:
+        - {name: agent, image: "acme/agent:1.0.0"}

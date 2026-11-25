@@ -1,0 +1,3 @@
+Traceback (most recent call last):
+  File "/app/consumer.py", line 41, in connect
+pika.exceptions.AMQPConnectionError: amqp://guest:${AMQP_PASSWORD}@rabbit.prod.svc:5672/%2F refused

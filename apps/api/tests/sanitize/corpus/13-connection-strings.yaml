@@ -1,0 +1,13 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: consumer, namespace: prod}
+spec:
+  template:
+    spec:
+      containers:
+        - name: consumer
+          image: acme/consumer:5.2.1
+          env:
+            - {name: MONGO_URL, value: "mongodb://reader:${DB_PASSWORD}@mongo-0.mongo:27017/app"}
+            - {name: BROKER, value: "amqp://guest:${AMQP_PASSWORD}@rabbit:5672/"}
+            - {name: CACHE, value: "redis://:${REDIS_PASSWORD}@redis:6379/0"}

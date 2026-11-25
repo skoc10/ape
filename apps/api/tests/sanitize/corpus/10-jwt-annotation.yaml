@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: session
+  namespace: prod
+  annotations:
+    example.com/session: "${JWT}"
+spec: {containers: [{name: app, image: "acme/session:1"}]}

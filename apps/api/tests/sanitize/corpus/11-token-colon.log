@@ -1,0 +1,3 @@
+bootstrap complete
+token: ${RANDOM_TOKEN}
+expires: 24h

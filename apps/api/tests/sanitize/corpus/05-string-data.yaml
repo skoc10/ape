@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Pod
+metadata: {name: seeded, namespace: prod}
+stringData:
+  password: "${DB_PASSWORD}"
+  api-key: "${API_TOKEN}"
+  username: admin

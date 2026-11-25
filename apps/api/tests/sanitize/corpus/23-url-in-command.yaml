@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Pod
+metadata: {name: puller, namespace: ci}
+spec:
+  containers:
+    - name: puller
+      image: curlimages/curl:8.10.1
+      command: ["sh", "-c", "curl -fsSL https://admin:${DB_PASSWORD}@registry.example.com/v2/_catalog"]

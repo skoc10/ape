@@ -1,0 +1,1 @@
+2026-11-20 08:02:44,120 ERROR notifier posting to #alerts with ${SLACK_BOT} failed: channel_not_found

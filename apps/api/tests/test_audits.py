@@ -155,7 +155,7 @@ async def test_collection_is_masked_and_stored_under_the_tenant_prefix(
     assert run["stats"]["counts"] == {"Node": 1, "Pod": 2}
     assert run["stats"]["objects"] == 3
     assert run["stats"]["truncated"] is False
-    assert run["stats"]["redactions"] == {"key_name": 2, "pem": 1}
+    assert run["stats"]["redactions"] == {"key_name": 2, "known_format": 1}
 
     row = admin_db.execute(
         "select snapshot_key from audit_runs where id = %s", (run_id,)
@@ -179,7 +179,9 @@ async def test_collection_is_masked_and_stored_under_the_tenant_prefix(
     assert snapshot["objects"][0]["spec"]["containers"][0]["image"] == "nginx:latest"
 
     assert 'ape_masking_redactions_total{detector="key_name"} 2.0' in client.get("/metrics").text
-    assert 'ape_masking_redactions_total{detector="pem"} 1.0' in client.get("/metrics").text
+    assert (
+        'ape_masking_redactions_total{detector="known_format"} 1.0' in client.get("/metrics").text
+    )
     listed = client.get(f"/v1/clusters/{agent['cluster_id']}/audits", headers=auth_a).json()
     assert [r["id"] for r in listed] == [run_id]
 

@@ -1,0 +1,12 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: postgres, namespace: data}
+spec:
+  template:
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16.4
+          env:
+            - {name: POSTGRES_USER, value: app}
+            - {name: POSTGRES_PASSWORD, value: "${DB_PASSWORD}"}

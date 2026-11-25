@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: tls
+  namespace: prod
+  annotations:
+    example.com/ca: |
+      ${PEM_CERT}
+data:
+  tls.key: |
+    ${PEM_KEY}

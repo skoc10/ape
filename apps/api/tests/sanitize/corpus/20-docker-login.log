@@ -1,0 +1,2 @@
++ docker login registry.example.com --username ci --password ${DB_PASSWORD}
+WARNING! Using --password via the CLI is insecure.

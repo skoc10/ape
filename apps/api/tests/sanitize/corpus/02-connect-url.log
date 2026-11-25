@@ -1,0 +1,2 @@
+2026-11-20T08:01:13Z INFO  Connecting to postgres://app:${DB_PASSWORD}@db.prod.svc:5432/app
+2026-11-20T08:01:13Z INFO  connected

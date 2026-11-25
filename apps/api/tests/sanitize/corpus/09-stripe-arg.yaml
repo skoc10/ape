@@ -1,0 +1,10 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: billing, namespace: prod}
+spec:
+  template:
+    spec:
+      containers:
+        - name: billing
+          image: acme/billing:3.1.0
+          args: ["--billing=${STRIPE_LIVE}", "--sandbox=${STRIPE_TEST}"]
