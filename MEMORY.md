@@ -117,6 +117,21 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
 - **Metrikler:** `ape_agent_sessions`, `ape_agent_messages_total{type,direction}`.
 - Oturum kaydı bellek içi; plan gereği tek `api` instance'ı varsayılıyor.
 
+### 2.3 Go ajanı: bağlantı katmanı ve telemetri (2026-11-25)
+
+- **Kütüphaneler:** `github.com/coder/websocket`, `prometheus/client_golang`, OpenTelemetry Go SDK
+  (OTLP/HTTP yalnızca `OTEL_EXPORTER_OTLP_ENDPOINT` doluysa), `log/slog` JSON (`trace_id`'li).
+- **Ayarlar (env):** `APE_ENDPOINT`, `APE_TOKEN` veya `APE_TOKEN_FILE`, `APE_METRICS_ADDR`
+  (varsayılan `127.0.0.1:9090`, yani yalnızca pod içi), `APE_ALLOW_INSECURE=true` olmadan `ws://`
+  reddedilir; `wss://` için en az TLS 1.3.
+- **Yeniden bağlanma:** 1 sn'den 60 sn'ye üstel geri çekilme, yarı aralıkta jitter; sağlıklı
+  oturumdan sonra sıfırlanır. 4401 (token reddi) ve 4409 (yerini başka ajan aldı) durumunda
+  doğrudan azami beklemeye geçer. Yerelde doğrulandı: API yeniden başlatılınca 2 sn'de bağlandı.
+- **Heartbeat:** aralık `hello_ack`'ten gelir; 3 aralık boyunca hiç mesaj gelmezse oturum düşer.
+  `ping` içinde son toplama süresi ve hata sayısı taşınır.
+- **Tek komut:** ajan yalnızca `collect_request` işler, aynı anda tek toplama; diğer her mesaj
+  yok sayılır.
+
 ## Kullanıcı Aksiyonu Gerekenler
 
 - **Control Plane alan adı (1.5).** Sihirbazdaki helm komutu şu an `ws://localhost:8000/v1/agent`
