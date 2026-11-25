@@ -292,3 +292,29 @@ func TestForbiddenListReportsAnErrorInsteadOfDone(t *testing.T) {
 		t.Errorf("error count = %d, want 1", errorCount)
 	}
 }
+
+// Security checklist: the agent logs kinds, counts and durations, never object content.
+func TestAgentLogsNeverContainObjectContent(t *testing.T) {
+	var logs bytes.Buffer
+	c, client := newCollector(t, false, cluster()...)
+	c.Logger = slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	rec := &recorder{limits: protocol.CollectLimits{MaxPods: 1, MaxCompressedBytes: 50 << 20}}
+	c.Handle(context.Background(), rec, protocol.CollectRequestPayload{RunId: runID})
+
+	// A failing run logs its error too.
+	client.PrependReactor("list", "services", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "services"}, "", nil)
+	})
+	c.Handle(context.Background(), &recorder{limits: rec.limits}, protocol.CollectRequestPayload{RunId: runID})
+	c.Hello(context.Background())
+
+	output := logs.String()
+	if !strings.Contains(output, "collection finished") || !strings.Contains(output, "collection failed") {
+		t.Fatalf("expected both outcomes in the log, got: %s", output)
+	}
+	for _, content := range []string{"web-1", "web-2", "coredns", "nginx:latest", "hunter2-env-literal", "node-1", "prod"} {
+		if strings.Contains(output, content) {
+			t.Errorf("log contains object content %q: %s", content, output)
+		}
+	}
+}

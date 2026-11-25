@@ -4,7 +4,9 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
 from ape.core.auth import JWKSCache, JWKSFetcher, TokenVerifier, http_jwks_fetcher
 from ape.core.config import Settings, get_settings
@@ -55,6 +57,20 @@ def create_app(
                 tracer_provider.shutdown()
 
     app = FastAPI(title="APE Control Plane API", version="0.1.0", lifespan=lifespan)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
+        # FastAPI's default body repeats the rejected input, which may be a secret pasted
+        # into the wrong field. Report where and why, never what.
+        detail = [
+            {
+                "loc": [str(part) for part in error["loc"]],
+                "type": error["type"],
+                "msg": error["msg"],
+            }
+            for error in exc.errors()
+        ]
+        return JSONResponse({"detail": detail}, status_code=422)
 
     metrics = Metrics()
     app.state.metrics = metrics

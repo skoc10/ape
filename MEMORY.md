@@ -357,7 +357,21 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
   taşıyamaz. GitHub hata gövdeleri kullanıcıya ve loga yansıtılmaz.
 - Yamalar yalnızca LLM açıkken üretildiği için PR butonu LLM'siz kurulumda görünmez.
 
+### 4.5 Güvenlik kontrol listesi (2026-11-25)
+
+- `docs/SECURITY.md`: 12 güvence, her biri hangi testle ve hangi CI işinde kanıtlandığıyla.
+- Yeni testler: `apps/api/tests/test_security_checklist.py` (ajan maskelenmemiş nesne yollasa bile
+  API ve worker loglarında nesne içeriği, token ve ekili sır yok; snapshot, LLM prompt'u,
+  bulgular ve raporda ekili sır yok) ve ajan tarafında `TestAgentLogsNeverContainObjectContent`.
+- **Bulunan ve kapatılan açık:** FastAPI'nin varsayılan 422 yanıtı reddedilen girdiyi geri
+  yansıtıyordu; artık yalnızca alan konumu ve hata türü dönüyor.
+- **ZDR:** otomatik doğrulanamaz; `docs/SECURITY.md` içindeki tablo kullanıcı tarafından
+  doldurulana kadar harici LLM kapalı kalmalı.
+
 ## Kullanıcı Aksiyonu Gerekenler
+
+- **ZDR yazılı onayı (4.5).** Harici LLM açılmadan önce `docs/SECURITY.md` içindeki "Zero Data
+  Retention" tablosu doldurulmalı (kim, ne zaman, kanıt).
 
 - **GitHub App oluşturma (4.4).** GitHub'da bir App: izinler Contents (read/write), Pull requests
   (read/write), Metadata (read); "Request user authorization (OAuth) during installation" açık;
