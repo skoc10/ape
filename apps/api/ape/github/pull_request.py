@@ -98,7 +98,6 @@ def plan_pull_request(
     cluster_name: str,
     summary: str,
     score: int | None,
-    report_url: str | None,
     now: datetime | None = None,
 ) -> PullRequestPlan:
     now = now or datetime.now(UTC)
@@ -122,8 +121,8 @@ def plan_pull_request(
     ]
     if score is not None:
         body += [f"Audit score: **{score} / 100**", ""]
-    if report_url:
-        body += [f"Full report: {report_url}", ""]
+    # No link to the report: it lives behind the panel's login, and the panel's address
+    # has no place in the customer's repository (white label).
     if result.applied:
         body += ["## Changes in this pull request", "", *_applied_table(result.applied), ""]
     if result.manual:

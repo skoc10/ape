@@ -247,9 +247,6 @@ async def open_pull_request(
         raise HTTPException(status.HTTP_409_CONFLICT, "this audit has no patches to propose")
 
     installation_id, repo = int(config["github_installation_id"]), str(config["github_repo"])
-    report_url = None
-    if settings.public_web_url:
-        report_url = f"{settings.public_web_url.rstrip('/')}/audits/{run_id}"
     try:
         base_branch, base_sha, sources = await github.read_manifests(
             installation_id, repo, str(config["manifest_path"] or "/")
@@ -260,7 +257,6 @@ async def open_pull_request(
             cluster_name=str(cluster["name"]) if cluster else "cluster",
             summary=str((run["stats"] or {}).get("summary") or ""),
             score=run["score"],
-            report_url=report_url,
         )
         if not plan.result.files:
             raise HTTPException(

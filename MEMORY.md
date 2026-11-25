@@ -376,8 +376,8 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
 - **GitHub App oluşturma (4.4).** GitHub'da bir App: izinler Contents (read/write), Pull requests
   (read/write), Metadata (read); "Request user authorization (OAuth) during installation" açık;
   Callback URL ve Setup URL `https://<panel-adresi>/github/callback`. Ardından `GITHUB_APP_ID`,
-  `GITHUB_APP_SLUG`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`
-  ve `PUBLIC_WEB_URL` ortam değişkenleri. Sonra gerçek bir test reposunda bir PR denenmeli;
+  `GITHUB_APP_SLUG`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` ve
+  `GITHUB_APP_PRIVATE_KEY` ortam değişkenleri. Sonra gerçek bir test reposunda bir PR denenmeli;
   özellikle bağlantı adımındaki `/user/installations/{id}/repositories` yanıtının `permissions.push`
   alanı gerçek GitHub'da doğrulanmalı (Hafta 4 review O1 yalnızca sahte GitHub'a karşı testli).
 
@@ -432,7 +432,8 @@ review commit'inde testleriyle düzeltildi (rapor: `reviews/hafta-4-review.md`):
 
 Backlog (düşük):
 
-- **D15:** PR açıklamasındaki rapor bağlantısı `PUBLIC_WEB_URL/audits/<id>`; gerçek yol
+- **D15 (kapatıldı, 2026-11-25):** rapor bağlantısı PR açıklamasından ve `PUBLIC_WEB_URL` ayarı
+  koddan kaldırıldı. Önceki durum: PR açıklamasındaki rapor bağlantısı `PUBLIC_WEB_URL/audits/<id>`; gerçek yol
   `/<orgSlug>/audits/<id>`, yani bağlantı 404 verir. Ayrıca müşterinin reposuna panel alan adını
   yazar (beyaz etiket). Öneri: bağlantıyı kaldır ya da kiracıya özel bir adres ayarı ekle.
 - **D16:** eşzamanlı iki `POST /audits/{id}/pr` iki PR açabilir (`set_pr_url` sonucu yok

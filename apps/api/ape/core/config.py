@@ -50,8 +50,6 @@ class Settings(BaseSettings):
     github_app_client_secret: str = ""
     github_api_url: str = "https://api.github.com"
     github_web_url: str = "https://github.com"
-    # Public address of the panel, used for links in pull request descriptions.
-    public_web_url: str = ""
 
     @property
     def github_configured(self) -> bool:

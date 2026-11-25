@@ -141,7 +141,6 @@ def gh_settings(settings: Settings) -> Settings:
             "github_app_client_secret": "client-secret",
             "github_api_url": "https://api.github.test",
             "github_web_url": "https://github.test",
-            "public_web_url": "https://panel.example.com/acme",
         }
     )
 
@@ -462,7 +461,7 @@ def test_pull_request_is_opened_with_patched_manifests(
     body = pull["body"]
     assert "Nothing was applied to the cluster" in body
     assert "Two issues need attention." in body and "Audit score: **42 / 100**" in body
-    assert f"https://panel.example.com/acme/audits/{run_id}" in body
+    assert "panel" not in body and "http" not in body.replace("https://github.com", "")
     assert (
         "| SEC-001 Privileged container | Deployment/shop/storefront | k8s/storefront.yaml | exact match"
         in body
@@ -559,7 +558,6 @@ def test_pull_request_description_for_the_three_matching_cases() -> None:
         cluster_name="prod",
         summary="",
         score=None,
-        report_url=None,
     )
     assert sorted(plan.result.files) == ["exact/storefront.yaml", "fallback/api.yaml"]
     assert "| exact/storefront.yaml | exact match (kind, namespace, name) |" in plan.body
@@ -595,7 +593,6 @@ def test_pull_request_text_cannot_break_the_table_or_add_links() -> None:
         cluster_name="prod",
         summary="see [the fix](https://evil.example)",
         score=None,
-        report_url=None,
     )
     line = next(text for text in plan.body.splitlines() if "trailing backslash" in text)
     # Every pipe that came from the title is escaped by an odd number of backslashes.
@@ -621,7 +618,6 @@ def test_a_patch_with_a_masking_placeholder_is_never_committed() -> None:
         cluster_name="prod",
         summary="",
         score=None,
-        report_url=None,
     )
     assert plan.result.files == {} and plan.result.applied == []
     assert [m.reason for m in plan.result.manual] == ["the patch contains a masked value"]
