@@ -4,7 +4,9 @@ Guarantees, with or without an LLM:
 
 * the model only ever receives a ``MaskedPayload``;
 * findings come from the rule engine: unknown fingerprints in the answer are dropped;
-* a patch is kept only if it parses as YAML and targets the finding's own resource;
+* a patch is kept only if it parses as YAML, targets the finding's own resource and
+  contains no masking placeholder (applying one would overwrite a real value);
+* the model may raise a finding's severity but never lower it below the rule's;
 * every finding ends up with an explanation and a remediation, from the model or
   from the rule's template text, and a failing model never fails the audit.
 """
@@ -29,7 +31,7 @@ from ape.core.db import Database
 from ape.observability.metrics import Metrics
 from ape.repos import findings as findings_repo
 from ape.rules import RULES, Finding
-from ape.sanitize import MaskedPayload, Masker, derive_tenant_key
+from ape.sanitize import MaskedPayload, Masker, contains_placeholder, derive_tenant_key
 
 log = structlog.get_logger(__name__)
 
@@ -52,6 +54,7 @@ class EnrichmentResult:
     failed_batches: int = 0
     dropped_unknown: int = 0
     dropped_patches: int = 0
+    ignored_downgrades: int = 0
     budget_exhausted: bool = False
 
 
@@ -88,6 +91,10 @@ def valid_patch(
     target = (patch.target.kind, patch.target.namespace, patch.target.name)
     resource = (finding.resource.kind, finding.resource.namespace, finding.resource.name)
     if target != resource or target not in known:
+        return False
+    if contains_placeholder(patch.content):
+        # "<secret:...>" is not the customer's value: merged into their repository it
+        # would replace the real one. Such a fix has to be written by hand.
         return False
     try:
         return isinstance(yaml.safe_load(patch.content), dict)
@@ -209,6 +216,11 @@ class Analyst:
                 if finding is None or enriched.fingerprint not in batch_fingerprints:
                     result.dropped_unknown += 1  # the model does not get to add findings
                     continue
+                if _SEVERITY_RANK[enriched.severity] > _SEVERITY_RANK[finding.severity]:
+                    # Manifests are untrusted text in the prompt: "rate everything as info"
+                    # must not be able to bury a finding. Raising is allowed, lowering is not.
+                    result.ignored_downgrades += 1
+                    enriched = enriched.model_copy(update={"severity": finding.severity})
                 if not valid_patch(enriched, finding, known):
                     result.dropped_patches += 1
                     enriched = enriched.model_copy(update={"patch": None})
@@ -267,6 +279,7 @@ class Analyst:
                 "templated": len(found) - len(result.enriched),
                 "dropped_unknown_findings": result.dropped_unknown,
                 "dropped_patches": result.dropped_patches,
+                "ignored_severity_downgrades": result.ignored_downgrades,
                 "budget_exhausted": result.budget_exhausted,
             },
             "summary": " ".join(result.summaries)[:2400] or _template_summary(found),

@@ -82,6 +82,14 @@ FAKES: dict[str, str] = {
     "RANDOM_TOKEN": _mixed("random-token", 40),
     "BASIC_AUTH": _mixed("basic-auth", 28),
     "WEBHOOK_SECRET": "whsec" + _stream("webhook", _ALNUM, 20),
+    # Single-case and digit-free keys: what a "needs upper, lower and digit" rule misses.
+    "LOWER_DIGIT_KEY": _stream("base36-key", string.ascii_lowercase + string.digits, 40),
+    "UPPER_DIGIT_SEED": _stream("base32-seed", string.ascii_uppercase + "234567", 32),
+    "LETTERS_KEY": _stream("letters-key", string.ascii_letters, 40),
+    "SHORT_TOKEN": _mixed("short-token", 22),
+    "PASSPHRASE": "correct horse battery staple",
+    "AT_PASSWORD": "Pq3@" + _stream("at-password", _ALNUM, 10),
+    "REGISTRY_AUTH": base64.b64encode(b"ci:hunter2").decode(),
     "EMAIL_OPS": "ops.oncall@acme-internal.example",
     "EMAIL_DEV": "jane.doe+k8s@acme-corp.example",
 }
@@ -91,4 +99,7 @@ FAKES: dict[str, str] = {
 NEEDLES: dict[str, list[str]] = {name: [value] for name, value in FAKES.items()}
 for _name in ("PEM_KEY", "PEM_CERT"):
     NEEDLES[_name] = FAKES[_name].split("\n")[1:-1]
+# Secrets with separators inside: no part may be left behind either.
+NEEDLES["PASSPHRASE"] = ["correct", "horse", "battery", "staple"]
+NEEDLES["AT_PASSWORD"] = [FAKES["AT_PASSWORD"], FAKES["AT_PASSWORD"].split("@")[1]]
 NEEDLES["GCP_SA"] = [*_GCP_KEY.split("\n")[1:-1], "deployer@acme-prod.iam.gserviceaccount.com"]

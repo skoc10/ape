@@ -184,3 +184,109 @@ def test_credential_headers_are_masked(masker: Masker) -> None:
     out = json.dumps(masker.mask({"httpGet": {"httpHeaders": headers}}))
     assert "header-leak" not in out
     assert "kubelet" in out
+
+
+# --- week 3 review: gaps in the entropy rule and in free-text values ------------------
+
+
+def test_single_case_and_hex_keys_under_innocent_names_are_masked(masker: Masker) -> None:
+    base36 = "gmxg9edn581u33xtplpft75v2seh60kvj50ce9uv"
+    base32 = "W53EFR4EDT2SYWB3WKH5DNSIPZZ5FK2Z9RI19R0W"
+    letters = "DXRZJzzzzgEOzdmenCkhvMdgaKjIgxNbenNyjOqw"
+    hex_key = "a4c123b1612dd272d1371c17149d4395"
+    short = "aZ9kQ2mX7pL4wR8tY1bN5v"  # 22 characters: cannot reach 4.4 bits of entropy
+    masked = masker.mask(
+        {
+            "env": [
+                {"name": "SIGNING", "value": base36},
+                {"name": "SEED", "value": base32},
+                {"name": "PEPPER", "value": letters},
+                {"name": "SALT", "value": hex_key},
+                {"name": "NONCE", "value": short},
+            ],
+            "args": [f"--seed=prefix-{base36}"],
+        }
+    )
+    dumped = json.dumps(masked)
+    for secret in (base36, base32, letters, hex_key, short):
+        assert secret not in dumped
+    assert masked["env"][3]["value"].startswith("<secret:hex:")
+    assert masker.redactions["entropy"] == 6
+
+
+def test_digests_revisions_and_words_are_not_mistaken_for_keys(masker: Masker) -> None:
+    digest = "ab12" * 16
+    commit = "9fceb02d0ae598e95dc970b74767f19372d61af8"
+    obj = {
+        "metadata": {
+            "annotations": {"checksum/config": digest, "example.com/build": f"sha256:{digest}"},
+            "labels": {"git-commit": commit},
+        },
+        "spec": {
+            "serviceAccountName": "kube-prometheus-stack-prometheus-operator",
+            "containers": [
+                {
+                    "args": [
+                        "--feature-gates=CustomResourceValidationExpressions=true",
+                        "--feature-gates=GracefulNodeShutdownBasedOnPodPriority=true",
+                        "--tls-cipher-suites=TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+                        "--nodegroup=ng-general-purpose-20240612093011223400000001",
+                    ],
+                    "env": [
+                        {"name": "GIT_COMMIT", "value": commit},
+                        {"name": "BUILD_NUMBER", "value": "20261124153045123456789012345678"},
+                    ],
+                }
+            ],
+        },
+        "status": {"nodeInfo": {"machineID": "ec2a" * 8}},
+        "findings": [{"fingerprint": digest}],
+    }
+    assert masker.mask(obj) == obj
+    assert sum(masker.redactions.values()) == 0
+
+
+def test_url_password_with_an_at_sign_is_masked_whole(masker: Masker) -> None:
+    masked = masker.mask_text("postgres://app:p@ssw0rd!x@db:5432/app")
+    assert masked.startswith("postgres://app:<secret:url_password:")
+    assert masked.endswith("@db:5432/app")
+    assert "ssw0rd" not in masked
+
+
+def test_quoted_values_are_masked_up_to_the_closing_quote(masker: Masker) -> None:
+    line = 'export DB_PASSWORD="correct horse battery" MODE="fast"'
+    masked = masker.mask_text(line)
+    assert "horse" not in masked and "battery" not in masked
+    assert masked.endswith('MODE="fast"')
+    blob = masker.mask_text('{"password": "x y", "host": "db"}')
+    assert '"x y"' not in blob and '"host": "db"' in blob
+    assert masker.mask_text(masked) == masked
+
+
+def test_value_after_a_sensitive_flag_is_masked(masker: Masker) -> None:
+    masked = masker.mask({"args": ["--api-key", "zzz999", "--mode", "fast", "--token", "--dry"]})
+    assert masked["args"][0] == "--api-key"
+    assert masked["args"][1].startswith("<secret:key_name:")
+    assert masked["args"][2:] == ["--mode", "fast", "--token", "--dry"]
+
+
+def test_registry_auth_pwd_and_presigned_urls(masker: Masker) -> None:
+    masked = masker.mask(
+        {
+            "auths": {"registry.example.com": {"auth": "Y2k6aHVudGVyMg=="}},
+            "PGPWD": "hunter2",
+            "authorization-mode": "Node,RBAC",
+            "url": "https://acct.blob.core.windows.net/c?sv=2024&sig=abcDEF123%2Fxyz%3D&se=2030",
+            "command": "mysqldump -u backup -pS3cretPass app",
+        }
+    )
+    dumped = json.dumps(masked)
+    for secret in ("Y2k6aHVudGVyMg==", "hunter2", "abcDEF123", "S3cretPass"):
+        assert secret not in dumped
+    assert masked["authorization-mode"] == "Node,RBAC"
+    assert masked["url"].endswith("&se=2030")
+
+
+def test_text_that_only_starts_like_a_placeholder_is_still_masked(masker: Masker) -> None:
+    masked = masker.mask_text("mongodb://app:<secret:hunter2hunter2@db/app")
+    assert "hunter2" not in masked

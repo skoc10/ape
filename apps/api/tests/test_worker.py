@@ -309,3 +309,34 @@ async def test_worker_loop_drains_the_queue_and_stops_on_request(
         "select count(*) from findings where org_id = %s", (tenant_b.org_id,)
     ).fetchone()
     assert count == (0,)
+
+
+async def test_a_failing_heartbeat_does_not_fail_the_run(
+    pipeline: Pipeline,
+    settings: Settings,
+    tenant_a: Tenant,
+    admin_db: psycopg.Connection[Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_id = await queue_run(admin_db, settings, tenant_a, tmp_path, objects=vulnerable_objects())
+    beats = 0
+
+    async def broken_heartbeat(tc: Any, run_id: uuid.UUID) -> None:
+        nonlocal beats
+        beats += 1
+        raise RuntimeError("connection reset")
+
+    async def slow_enrich(
+        run: ClaimedRun, objects: list[dict[str, Any]], found: list[Finding]
+    ) -> dict[str, Any]:
+        await asyncio.sleep(0.3)
+        return {}
+
+    monkeypatch.setattr("ape.repos.audit_runs.heartbeat", broken_heartbeat)
+    pipeline.enrich = slow_enrich
+    run = await pipeline.claim()
+    assert run is not None
+    assert await pipeline.process(run) == "completed"
+    assert beats >= 2  # it kept trying instead of dying on the first error
+    assert run_row(admin_db, run_id)["status"] == "completed"

@@ -357,6 +357,7 @@ async def test_without_an_llm_the_report_uses_template_text(
         "templated": 18,
         "dropped_unknown_findings": 0,
         "dropped_patches": 0,
+        "ignored_severity_downgrades": 0,
         "budget_exhausted": False,
     }
     assert stats["summary"].startswith("The audit found 18 issues (3 critical")
@@ -406,3 +407,48 @@ async def test_native_structured_output_mode(settings: Settings, db: Database) -
 
     with pytest.raises(ValueError, match="unknown LLM_OUTPUT_MODE"):
         analyst(settings, db, FunctionModel(respond), llm_output_mode="telepathy")
+
+
+# --- week 3 review ---------------------------------------------------------------------
+
+
+async def test_the_model_can_raise_but_not_lower_severity(settings: Settings, db: Database) -> None:
+    objects = vulnerable_objects()
+    found = run_rules(objects)
+    critical = next(f for f in found if f.severity == "critical")
+    medium = next(f for f in found if f.severity == "medium")
+
+    def mutate(findings: list[dict[str, Any]], items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        for finding in findings:
+            if finding["fingerprint"] == critical.fingerprint:
+                finding["severity"] = "info"  # e.g. talked into it by text in a manifest
+            if finding["fingerprint"] == medium.fingerprint:
+                finding["severity"] = "high"
+        return findings
+
+    result = await analyst(settings, db, Scripted(mutate).model()).analyse("org_x", objects, found)
+    assert result.enriched[critical.fingerprint].severity == "critical"
+    assert result.enriched[medium.fingerprint].severity == "high"
+    assert result.ignored_downgrades == 1
+
+
+async def test_a_patch_that_contains_a_placeholder_is_dropped(
+    settings: Settings, db: Database
+) -> None:
+    objects = vulnerable_objects()
+    found = run_rules(objects)
+
+    def mutate(findings: list[dict[str, Any]], items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        findings[0]["patch"]["content"] = (
+            "spec:\n  template:\n    spec:\n      containers:\n        - name: app\n"
+            "          env:\n            - name: DB_PASSWORD\n"
+            "              value: <secret:key_name:7f3a>\n"
+        )
+        findings[1]["patch"]["content"] = "metadata:\n  annotations:\n    x: <redacted:len=12>\n"
+        return findings
+
+    result = await analyst(settings, db, Scripted(mutate).model()).analyse("org_x", objects, found)
+    assert result.dropped_patches == 2
+    assert result.enriched[found[0].fingerprint].patch is None
+    assert result.enriched[found[1].fingerprint].patch is None
+    assert result.enriched[found[2].fingerprint].patch is not None

@@ -121,8 +121,13 @@ class Pipeline:
         """Keeps locked_at fresh so a long but healthy job is not handed to another worker."""
         while True:
             await asyncio.sleep(self.settings.worker_heartbeat_seconds)
-            async with self.db.tenant(run.org_id) as tc:
-                await audit_runs.heartbeat(tc, run.id)
+            try:
+                async with self.db.tenant(run.org_id) as tc:
+                    await audit_runs.heartbeat(tc, run.id)
+            except Exception as exc:
+                # A missed beat must not take the run (or the worker) down with it: the
+                # next one may succeed, and a lock that really goes stale is reclaimed.
+                log.warning("heartbeat_failed", run_id=str(run.id), error_type=type(exc).__name__)
 
 
 def _load_objects(raw: bytes) -> list[dict[str, Any]]:

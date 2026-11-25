@@ -321,6 +321,48 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
 
 ## Haftalık Review Notları
 
+### Hafta 3 Review: Temiz (2026-11-25)
+
+Bağımsız reviewer `62fe64f` üzerinde hükmü verdi: kritik veya yüksek bulgu yok, Hafta 4 onaylandı.
+Beş orta bulgu review commit'inde testleriyle düzeltildi (rapor: `reviews/hafta-3-review.md`):
+
+- **O1 (entropi kuralı):** "büyük + küçük + rakam" şartı tek harf düzenli anahtarları (base32,
+  base36), rakamsız rastgele harfleri ve hex anahtarları masum adlar altında kaçırıyordu; 21-25
+  karakterlik dizgilerde 4,0 eşiği de rastgele token'ların önemli bir kısmını geçiriyordu.
+  Yeni kural: eşik kısa dizgilerde `0,85 x log2(uzunluk)`'a iner; ayraçsız harf-rakam parçaları
+  sınıf geçişlerine göre değerlendirilir; 32+ karakterlik hex ayrı dedektör (`<secret:hex:..>`).
+  Muafiyet: `sha256:` önekli değerler ve `checksum`, `hash`, `digest`, `commit`, `revision`,
+  `fingerprint`, `uid`, `...id` adlı alanlar. Kalan bilinen boşluk: yalnızca küçük harften oluşan
+  rastgele dizgiler (sözcükten ayırt edilemiyor).
+- **O2 (metin içi değerler):** URL parolasında `@` varsa kuyruğu, tırnaklı değerde boşluktan
+  sonrası sızıyordu; ikisi de bütün olarak maskeleniyor. Ek olarak: `["--password", "x"]` gibi
+  ayrı liste öğeleri, `auth` (registry girişi) ve `pwd` adları, ön imzalı URL imzaları (`sig=`),
+  `mysql -pPAROLA`.
+- **O3 (LLM önem derecesi):** model önem derecesini yükseltebilir ama kuralın altına indiremez
+  (manifest içindeki metin bulguyu "info"ya çektiremez). Sayaç: `stats.llm.ignored_severity_downgrades`.
+- **O4 (yer tutuculu yama):** içinde `<secret:..>` ya da `<redacted:..>` geçen yama atılır; PR'a
+  girseydi müşterinin gerçek değerini yer tutucuyla ezerdi. Plandaki "yama yer tutucu içerebilir"
+  notu bu yönde daraltıldı.
+- **O5 (heartbeat):** tek bir heartbeat hatası başarılı bir analizi ve worker sürecini düşürüyordu;
+  artık yalnızca loglanıyor.
+
+Backlog (düşük):
+
+- **D8 (4.6):** `ape-worker` imajı yok (API için Dockerfile da yok); 3.4 DoD'unun "imaj" kısmı açık.
+- **D9:** `app.claim_audit_run` parametreleri çağırandan geliyor; fonksiyon içinde alt sınır koy
+  (`p_stale_after >= 1 dakika`, `p_max_attempts >= 1`). Geri alınan işte eski worker'ı durduran
+  bir sahiplik belirteci (`locked_by`) yok.
+- **D10:** `stats.findings` sayıları kural önem derecesinden, liste LLM'in yükselttiği dereceden;
+  rapor (4.1) tek kaynaktan saymalı.
+- **D11:** AWS ARN'leri ve rol adları entropi kuralına takılıyor (güvenli yönde hata, LLM
+  bağlamını zayıflatır). Tırnaksız boşluklu değerler (`password: correct horse`) ve `/` içeren
+  URL parolaları hâlâ kısmen açık.
+- **D12:** başarısız ve bütçeyi aşan LLM çağrılarının token'ları sayılmıyor; `explanation`,
+  `remediation` ve `patch.content` için uzunluk sınırı yok.
+- **D13:** sahibi toplanmayan bir tür olan pod'lar (Argo Rollout vb.) hiçbir kuralda görünmüyor.
+- **D14 (4.3'ten önce):** PR açılırken yama hedefi ve içeriği yeniden doğrulanmalı (yalnızca
+  bulgunun kaynağı, yer tutucu yok); `task eval` ve gerçek Claude çağrısı hâlâ sınanmadı.
+
 ### Hafta 2 Review: Temiz (2026-11-25)
 
 Bağımsız reviewer `e8f8a32` üzerinde hükmü verdi: kritik veya yüksek bulgu yok, Hafta 3 onaylandı.
