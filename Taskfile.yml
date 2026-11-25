@@ -179,6 +179,12 @@ tasks:
     desc: Delete the local kind cluster
     cmds: ["kind delete cluster --name {{.KIND_CLUSTER}}"]
 
+  kind-vuln:
+    desc: Apply the deliberately misconfigured test set to the local kind cluster
+    deps: [kind-up]
+    cmds:
+      - kubectl --context kind-{{.KIND_CLUSTER}} apply -f testdata/vulnerable/manifests/
+
   images:
     desc: Build container images locally (api, web and worker images land in task 1.6)
     cmds:

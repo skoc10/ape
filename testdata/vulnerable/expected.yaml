@@ -1,0 +1,23 @@
+# Findings the rule engine must produce for the namespaces of this set (and nothing else
+# for them). Format: rule id -> list of "Kind/namespace/name" ("-" for cluster scoped).
+SEC-001: [Deployment/vuln-shop/storefront]                      # privileged container
+SEC-002: [Deployment/vuln-shop/storefront]                      # hostNetwork, hostPID, hostPath
+SEC-003: [Deployment/vuln-shop/storefront]                      # runs as root
+SEC-004: [Deployment/vuln-shop/storefront]                      # allowPrivilegeEscalation
+SEC-005: [Deployment/vuln-shop/storefront]                      # :latest and untagged images
+RBAC-001: [ClusterRole/-/vuln-everything]                       # wildcard verbs and resources
+RBAC-002: [ClusterRoleBinding/-/vuln-batch-is-cluster-admin]    # cluster-admin binding
+RBAC-003:                                                       # default SA with mounted token
+  - Deployment/vuln-shop/storefront
+  - CronJob/vuln-batch/nightly-export
+RBAC-004: [Role/vuln-shop/secret-reader]                        # list on secrets
+NET-001: [Namespace/-/vuln-shop, Namespace/-/vuln-batch]        # no NetworkPolicy
+NET-002:                                                        # exposed outside the cluster
+  - Service/vuln-shop/storefront-public
+  - Service/vuln-shop/orders-db-nodeport
+COST-001: [Deployment/vuln-shop/storefront]                     # no requests or limits
+REL-001:                                                        # missing probes
+  - Deployment/vuln-shop/storefront
+  - StatefulSet/vuln-shop/orders-db
+  - CronJob/vuln-batch/nightly-export
+REL-002: [Deployment/vuln-shop/storefront]                      # single replica, no PDB

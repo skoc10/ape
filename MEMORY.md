@@ -189,6 +189,15 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
   audit, S3'teki snapshot'ta ekili sırların olmadığı kontrolü). Yerelde 248 nesne, 12 parça ile
   geçti; CI'da `e2e` iş akışı.
 
+### 3.1 Kötü manifest seti (2026-11-25)
+
+- `testdata/vulnerable/manifests/` 14 kuralı tetikler (`vuln-shop`, `vuln-batch`); `clean-app`
+  negatif kontroldür. Beklenen bulgular `expected.yaml`, ekili sahte sırlar `planted-secrets.txt`.
+- `COST-002` (istek gerçek kullanımın 3 katı) metrics-server gerektirdiği için bu sette yok;
+  kural birim testleriyle kapsanacak.
+- Kural kimlikleri: `SEC-001..005`, `RBAC-001..004`, `NET-001..002`, `COST-001..002`,
+  `REL-001..002`.
+
 ## Kullanıcı Aksiyonu Gerekenler
 
 - **`MASKING_KEY` (prod).** `.env.example` içindeki değer yalnızca yerel içindir; prod için
