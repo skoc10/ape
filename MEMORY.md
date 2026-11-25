@@ -115,7 +115,7 @@ Bağımsız reviewer kritik açık bulmadı. Düzeltilenler (2026-11-25):
   `app.member_role(user, org)` fonksiyonuyla sorgulanıyor (toplu okuma yok).
 - **D4:** ayrılmış slug'lar sunucuda `beforeCreateOrganization` hook'unda reddediliyor.
 
-Ertelenenler:
+Hafta 4 / v1.1 backlog (kullanıcı kararı, 2026-11-25):
 
 - **D3:** SMTP gelince `requireEmailVerification` ve `requireEmailVerificationOnInvitation` açılacak.
 - **D5 (4.6):** web güvenlik başlıkları (CSP, frame-ancestors, nosniff, Referrer-Policy),
