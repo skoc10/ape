@@ -38,7 +38,7 @@ spec:
             {{- include "cp.secretEnv" (dict "root" . "name" "BETTER_AUTH_SECRET") | nindent 12 }}
             {{- include "cp.secretEnv" (dict "root" . "name" "APP_AUTH_PASSWORD") | nindent 12 }}
             - name: AUTH_DATABASE_URL
-              value: "postgres://app_auth:$(APP_AUTH_PASSWORD)@{{ include "cp.pgHost" . }}:{{ include "cp.pgPort" . }}/{{ .Values.postgres.database }}?sslmode={{ include "cp.pgSslmode" . }}"
+              value: "postgres://app_auth:$(APP_AUTH_PASSWORD)@{{ include "cp.pgHost" . }}:{{ include "cp.pgPort" . }}/{{ .Values.postgres.database }}?sslmode={{ include "cp.pgSslmode" . }}&uselibpqcompat=true"
             - name: API_URL
               value: "http://{{ .Release.Name }}-api:8000"
             - name: AGENT_ENDPOINT

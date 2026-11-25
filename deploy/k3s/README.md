@@ -132,5 +132,5 @@ outside the VPS, or copy the `backups` bucket off the machine regularly.
 helm upgrade ape oci://ghcr.io/skoc10/charts/ape-control-plane -n ape -f values-production.yaml --wait
 ```
 
-The migration job runs after every upgrade. Agents reconnect on their own within a minute
+A new migration job runs with every upgrade. Agents reconnect on their own within a minute
 when the `api` pod restarts.

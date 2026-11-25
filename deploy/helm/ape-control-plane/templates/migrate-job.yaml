@@ -1,6 +1,10 @@
-# Runs after every install and upgrade: creates or refreshes the three roles (as the
-# superuser) and applies pending migrations (as app_migrator). The application pods
-# never hold the superuser or the migrator password.
+# One job per release revision: creates or refreshes the three roles (as the superuser)
+# and applies pending migrations (as app_migrator). The application pods never hold the
+# superuser or the migrator password.
+#
+# Deliberately a normal resource and not a Helm hook: with `helm --wait`, post-install
+# hooks only start after every pod is ready, and the api pod cannot become ready before
+# its database role exists.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -8,9 +12,6 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "cp.labels" . | nindent 4 }}
-  annotations:
-    helm.sh/hook: post-install,post-upgrade
-    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   backoffLimit: 30
   ttlSecondsAfterFinished: 86400
