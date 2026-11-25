@@ -104,7 +104,17 @@ ok("create two organizations");
 
 r = await alice.json("/api/auth/organization/create", { method: "POST", body: { name: "Shadow", slug: "sign-in" } });
 assert.equal(r.status, 400);
-ok("reserved URL names are rejected on the server");
+r = await alice.json("/api/auth/organization/update", {
+  method: "POST",
+  body: { organizationId: org1.id, data: { slug: "sign-in" } },
+});
+assert.equal(r.status, 400);
+r = await alice.json("/api/auth/organization/update", {
+  method: "POST",
+  body: { organizationId: org1.id, data: { name: `Customer One ${run} Ltd` } },
+});
+assert.equal(r.status, 200, JSON.stringify(r.data));
+ok("reserved URL names are rejected on the server, on create and on update");
 
 res = await alice.request("/sign-in?next=%2F%09%2Fevil.example");
 assert.equal(res.status, 307);

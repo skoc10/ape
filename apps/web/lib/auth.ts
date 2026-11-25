@@ -30,6 +30,12 @@ export const auth = betterAuth({
             throw new APIError("BAD_REQUEST", { message: "This URL name is not available." });
           }
         },
+        // A rename must not sneak a reserved or malformed slug in either.
+        beforeUpdateOrganization: async ({ organization }) => {
+          if (organization.slug !== undefined && !isValidOrgSlug(organization.slug)) {
+            throw new APIError("BAD_REQUEST", { message: "This URL name is not available." });
+          }
+        },
       },
       // No SMTP in the MVP yet: the invitation link is shown to the inviter in
       // the panel and written to the server log. Only the invitation id is

@@ -104,7 +104,13 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
 
 ## Haftalık Review Notları
 
-### Hafta 1 (ara rapor, 1.1-1.4; nihai hüküm 1.5 incelenince)
+### Hafta 1 Review: Temiz (2026-11-25)
+
+Bağımsız reviewer `6381df9` üzerinde nihai hükmü verdi: kritik veya orta bulgu yok, Hafta 2
+onaylandı. Son düşük bulgu (ayrılmış slug'ın `organization/update` ile verilebilmesi)
+`beforeUpdateOrganization` hook'u ve uçtan uca testle kapatıldı.
+
+### Hafta 1 ara rapor (1.1-1.4)
 
 Bağımsız reviewer kritik açık bulmadı. Düzeltilenler (2026-11-25):
 
