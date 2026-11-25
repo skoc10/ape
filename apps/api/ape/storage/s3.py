@@ -26,6 +26,22 @@ def _prefix(org_id: str, run_id: UUID) -> str:
     return f"{org_id}/{run_id}"
 
 
+def _org_prefix(org_id: str) -> str:
+    if not _ORG_ID.fullmatch(org_id):
+        raise ValueError("org_id is not usable as an object key prefix")
+    return org_id
+
+
+def logo_key(org_id: str) -> str:
+    return f"{_org_prefix(org_id)}/branding/logo"
+
+
+def report_key(org_id: str, run_id: UUID, extension: str) -> str:
+    if extension not in {"html", "pdf"}:
+        raise ValueError("unknown report format")
+    return f"{_prefix(org_id, run_id)}/report.{extension}"
+
+
 def snapshot_key(org_id: str, run_id: UUID) -> str:
     return f"{_prefix(org_id, run_id)}/snapshot.json.gz"
 
@@ -33,6 +49,7 @@ def snapshot_key(org_id: str, run_id: UUID) -> str:
 class ObjectStore:
     def __init__(self, settings: Settings) -> None:
         self._snapshots = settings.s3_bucket_snapshots
+        self._reports = settings.s3_bucket_reports
         self._client: Any = boto3.client(
             "s3",
             endpoint_url=settings.s3_endpoint_url or None,
@@ -67,3 +84,72 @@ class ObjectStore:
         )
         body: bytes = await asyncio.to_thread(response["Body"].read)
         return body
+
+    # --- branding and reports (reports bucket) -------------------------------------------
+
+    async def put_logo(self, org_id: str, data: bytes, content_type: str) -> str:
+        key = logo_key(org_id)
+        await asyncio.to_thread(
+            self._client.put_object,
+            Bucket=self._reports,
+            Key=key,
+            Body=data,
+            ContentType=content_type,
+        )
+        return key
+
+    async def get_logo(self, org_id: str) -> tuple[bytes, str] | None:
+        try:
+            response = await asyncio.to_thread(
+                self._client.get_object, Bucket=self._reports, Key=logo_key(org_id)
+            )
+        except self._client.exceptions.NoSuchKey:
+            return None
+        body: bytes = await asyncio.to_thread(response["Body"].read)
+        return body, str(response.get("ContentType") or "application/octet-stream")
+
+    async def delete_logo(self, org_id: str) -> None:
+        await asyncio.to_thread(
+            self._client.delete_object, Bucket=self._reports, Key=logo_key(org_id)
+        )
+
+    async def put_report(
+        self, org_id: str, run_id: UUID, extension: str, data: bytes, content_type: str
+    ) -> str:
+        key = report_key(org_id, run_id, extension)
+        await asyncio.to_thread(
+            self._client.put_object,
+            Bucket=self._reports,
+            Key=key,
+            Body=data,
+            ContentType=content_type,
+        )
+        return key
+
+    async def get_report(self, org_id: str, run_id: UUID, extension: str) -> bytes | None:
+        try:
+            response = await asyncio.to_thread(
+                self._client.get_object,
+                Bucket=self._reports,
+                Key=report_key(org_id, run_id, extension),
+            )
+        except self._client.exceptions.NoSuchKey:
+            return None
+        body: bytes = await asyncio.to_thread(response["Body"].read)
+        return body
+
+    async def presign_report(
+        self, org_id: str, run_id: UUID, extension: str, *, filename: str, expires_in: int = 300
+    ) -> str:
+        """A short-lived download link, created only after the caller's tenant was checked."""
+        url: str = await asyncio.to_thread(
+            self._client.generate_presigned_url,
+            "get_object",
+            Params={
+                "Bucket": self._reports,
+                "Key": report_key(org_id, run_id, extension),
+                "ResponseContentDisposition": f'attachment; filename="{filename}"',
+            },
+            ExpiresIn=expires_in,
+        )
+        return url

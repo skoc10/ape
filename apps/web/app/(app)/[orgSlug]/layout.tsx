@@ -22,6 +22,9 @@ export default async function OrgLayout({ children, params }: LayoutProps<"/[org
           <Link href={`/${organization.slug}/settings/members`} className="hover:underline">
             Members
           </Link>
+          <Link href={`/${organization.slug}/settings/branding`} className="hover:underline">
+            Branding
+          </Link>
         </nav>
         <div className="ml-auto flex items-center gap-3 text-sm text-muted-foreground">
           <span>{session.user.email}</span>

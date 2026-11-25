@@ -293,6 +293,16 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
 - Uçtan uca test artık worker'ı da kapsıyor: kind üzerindeki kötü manifest seti için beklenen
   18 bulgu birebir çıkıyor, `clean-app` temiz, ekili sırlar ne snapshot'ta ne bulgularda.
 
+### 4.1 Beyaz etiket ayarları (2026-11-25)
+
+- `GET /v1/settings`, `PUT /v1/settings/branding`, `PUT/GET/DELETE /v1/settings/logo`; yazma
+  owner/admin. `branding` jsonb: `company_name`, `primary_color` (`#rrggbb`), `logo_key`,
+  `logo_content_type`.
+- **Logo yalnızca PNG ya da JPEG, en fazla 512 KiB;** tür istemcinin beyanına değil dosyanın ilk
+  baytlarına göre belirlenir. SVG bilerek reddedilir (script ve dış referans taşıyabilir ve her
+  müşterinin raporuna girer). Nesne anahtarı `{org_id}/branding/logo`, `reports` bucket'ında.
+- Panelde `/[orgSlug]/settings/branding`; logo önizlemesi API üzerinden data URI olarak gelir.
+
 ## Kullanıcı Aksiyonu Gerekenler
 
 - **Claude API anahtarı ve ZDR onayı (3.5).** LLM zenginleştirmesini açmak için worker'a
