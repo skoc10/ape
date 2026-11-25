@@ -1,0 +1,7 @@
+apiVersion: v2
+name: ape-control-plane
+description: Control Plane (web, api, worker) with PostgreSQL through CloudNativePG and S3-compatible storage. Runs on any Kubernetes; built for a single-node k3s.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.27.0-0"

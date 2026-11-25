@@ -1,0 +1,57 @@
+{{- if .Values.ingress.enabled }}
+# Only two things are reachable from outside: the panel and the agent WebSocket.
+# The REST API, /metrics, /docs and the database stay cluster-internal.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cp.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.ingress.tls.enabled }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.tls.clusterIssuer }}
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - secretName: {{ .Values.ingress.tls.secretName }}
+      hosts:
+        - {{ required "host is required" .Values.host }}
+        {{- with .Values.s3.publicHost }}
+        - {{ . }}
+        {{- end }}
+  {{- end }}
+  rules:
+    - host: {{ required "host is required" .Values.host }}
+      http:
+        paths:
+          - path: /v1/agent
+            pathType: Exact
+            backend:
+              service:
+                name: {{ .Release.Name }}-api
+                port: {name: http}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-web
+                port: {name: http}
+    {{- if and .Values.s3.publicHost (eq .Values.s3.mode "seaweedfs") }}
+    # Presigned report downloads. Objects are private: only signed URLs work.
+    - host: {{ .Values.s3.publicHost }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-s3
+                port: {name: s3}
+    {{- end }}
+{{- end }}

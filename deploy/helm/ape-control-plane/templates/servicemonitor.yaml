@@ -1,0 +1,24 @@
+{{- if .Values.observability.serviceMonitor.enabled }}
+{{- range $component, $port := dict "api" "http" "worker" "metrics" }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ $.Release.Name }}-{{ $component }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "cp.labels" $ | nindent 4 }}
+    {{- with $.Values.observability.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+      app.kubernetes.io/component: {{ $component }}
+  endpoints:
+    - port: {{ $port }}
+      path: /metrics
+      interval: 30s
+{{- end }}
+{{- end }}

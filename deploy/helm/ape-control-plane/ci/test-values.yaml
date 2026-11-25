@@ -1,0 +1,4 @@
+host: cp.example.test
+ingress:
+  tls:
+    enabled: false

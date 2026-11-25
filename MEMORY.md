@@ -368,7 +368,40 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
 - **ZDR:** otomatik doğrulanamaz; `docs/SECURITY.md` içindeki tablo kullanıcı tarafından
   doldurulana kadar harici LLM kapalı kalmalı.
 
+### 1.6 ve 4.6 ön hazırlığı: imajlar ve Control Plane chart'ı (2026-11-25)
+
+- **İmajlar:** `apps/api/Dockerfile` tek dosyada iki hedef (`api`, `worker`; Pango ve fontlar
+  yalnızca worker'da), `apps/web/Dockerfile` (Next.js standalone), `db/docker/Dockerfile`
+  (`ape-migrate`: psql + dbmate + migration'lar). Plandaki `Dockerfile.api`/`Dockerfile.worker`
+  yerine tek dosya, çünkü Python paketi ortak.
+- **Chart `deploy/helm/ape-control-plane`:** web, api, worker Deployment'ları (non-root, salt-okur
+  kök dosya sistemi), CloudNativePG `Cluster` (isteğe bağlı günlük yedek), tek düğümlü SeaweedFS
+  StatefulSet'i, migration Job'ı (install/upgrade sonrası hook: süper kullanıcıyla üç rolü
+  oluşturur, sonra `app_migrator` ile dbmate), Ingress, isteğe bağlı ServiceMonitor.
+- **Dışarıya açık olanlar yalnızca** panel (`/`) ve ajan WebSocket'i (`/v1/agent`), bir de
+  `s3.publicHost` verilirse imzalı indirme adresi. REST API, `/metrics`, `/docs` ve veritabanı
+  cluster içinde kalır (review D5).
+- **Sırlar ilk kurulumda üretilir** (`ape-secrets`: rol parolaları, `BETTER_AUTH_SECRET`,
+  `MASKING_KEY`, S3 anahtarları), upgrade'de korunur ve release silinse de kalır.
+- **Doğrulama CI'da:** `charts` iş akışındaki `control-plane-install` işi imajları build edip kind
+  üzerinde CNPG + chart kurar. Yerelde denenemedi: Mac'in diski doldu (aşağıya bak).
+- **Yayın:** `control-plane-release.yml` (`cp-v*` etiketi). Henüz çalıştırılmadı.
+
+### Yerel ortam notu: disk (2026-11-25)
+
+Mac'in diski bu çalışma sırasında tamamen doldu (460 GB'ın 129 MB'ı boş kaldı) ve Colima I/O
+hatası verdi. Colima yeniden başlatıldı; bu oturumun eklediği büyük şeyler silindi: Ollama imajı
+ve model volume'u (yaklaşık 9 GB), dört Control Plane imajı, Go/uv/lint önbellekleri ve
+`apps/web/.next`. Şu an yaklaşık 12 GB boş. Bu makinede büyük imaj build'i ve yerel LLM denemesi
+yapılmamalı; ağır doğrulamalar CI'da.
+
 ## Kullanıcı Aksiyonu Gerekenler
+
+- **VPS ve DNS (4.6).** `deploy/k3s/README.md` adımları hazır; gereken: 4 GB+ RAM'li bir VPS ve iki
+  A kaydı (ör. `cp.<alan>` ve `files.<alan>`). Ardından `cp-v0.1.0` etiketiyle imajlar ve chart
+  yayınlanmalı. Yedekten geri yükleme denemesi ve Prometheus kurulumu da bu adımda.
+- **Dogfooding (4.7).** Gerçek bir müşteri cluster'ında uçtan uca röntgen, süre ölçümü.
+- **Mac'te disk alanı.** Yaklaşık 12 GB boş; yerel geliştirme için yer açılması iyi olur.
 
 - **ZDR yazılı onayı (4.5).** Harici LLM açılmadan önce `docs/SECURITY.md` içindeki "Zero Data
   Retention" tablosu doldurulmalı (kim, ne zaman, kanıt).

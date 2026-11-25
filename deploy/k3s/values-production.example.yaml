@@ -1,0 +1,25 @@
+# Copy to values-production.yaml (do not commit it) and adjust.
+host: cp.example.com
+
+image:
+  tag: "0.1.0"
+
+s3:
+  # A second DNS name for report downloads through presigned URLs.
+  publicHost: files.example.com
+
+postgres:
+  storage:
+    size: 20Gi
+  backup:
+    enabled: true          # daily base backup + WAL archive into the S3 storage
+
+observability:
+  serviceMonitor:
+    enabled: false         # true once the Prometheus Operator is installed
+
+# llm:
+#   provider: anthropic
+#   apiKeySecret: llm-api-key          # kubectl create secret generic llm-api-key --from-literal=LLM_API_KEY=...
+# github:
+#   existingSecret: github-app         # see README.md in this directory

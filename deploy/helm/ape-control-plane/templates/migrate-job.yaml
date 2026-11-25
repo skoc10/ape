@@ -1,0 +1,61 @@
+# Runs after every install and upgrade: creates or refreshes the three roles (as the
+# superuser) and applies pending migrations (as app_migrator). The application pods
+# never hold the superuser or the migrator password.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-migrate-{{ .Release.Revision }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cp.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 30
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        {{- include "cp.selector" (dict "root" . "component" "migrate") | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- include "cp.podSecurity" . | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "cp.image" (dict "root" . "name" "ape-migrate") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- include "cp.containerSecurity" . | nindent 12 }}
+          env:
+            - name: BOOTSTRAP_ROLES
+              value: {{ .Values.migrations.bootstrapRoles | quote }}
+            - name: APP_DATABASE
+              value: {{ .Values.postgres.database | quote }}
+            - name: PGHOST
+              value: {{ include "cp.pgHost" . | quote }}
+            - name: PGPORT
+              value: {{ include "cp.pgPort" . | quote }}
+            - name: PGSSLMODE
+              value: {{ include "cp.pgSslmode" . | quote }}
+            {{- $super := ternary (printf "%s-pg-superuser" .Release.Name) .Values.postgres.external.superuserSecret (eq .Values.postgres.mode "cnpg") }}
+            {{- if and .Values.migrations.bootstrapRoles $super }}
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef: {name: {{ $super }}, key: username}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: {name: {{ $super }}, key: password}
+            {{- end }}
+            {{- include "cp.secretEnv" (dict "root" . "name" "APP_MIGRATOR_PASSWORD") | nindent 12 }}
+            {{- include "cp.secretEnv" (dict "root" . "name" "APP_AUTH_PASSWORD") | nindent 12 }}
+            {{- include "cp.secretEnv" (dict "root" . "name" "APP_BACKEND_PASSWORD") | nindent 12 }}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 128Mi}

@@ -1,9 +1,9 @@
 name: charts
 on:
   push:
-    paths: ["deploy/helm/**", "agent/**", ".github/workflows/charts.yml"]
+    paths: ["deploy/helm/**", "agent/**", "apps/**/Dockerfile", "db/**", ".github/workflows/charts.yml"]
   pull_request:
-    paths: ["deploy/helm/**", "agent/**", ".github/workflows/charts.yml"]
+    paths: ["deploy/helm/**", "agent/**", "apps/**/Dockerfile", "db/**", ".github/workflows/charts.yml"]
 permissions:
   contents: read
 concurrency:
@@ -70,3 +70,70 @@ jobs:
       - name: Agent log
         if: always()
         run: kubectl -n ape-system logs deploy/ape-agent --tail=20 || true
+
+  # Builds the Control Plane images, installs CloudNativePG and the chart on kind, and
+  # checks that migrations ran and web, api and worker came up.
+  control-plane-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: ape-ci
+      - name: Build and load images
+        run: |
+          docker build --target api -t ghcr.io/skoc10/ape-api:ci apps/api
+          docker build --target worker -t ghcr.io/skoc10/ape-worker:ci apps/api
+          docker build -t ghcr.io/skoc10/ape-web:ci apps/web
+          docker build -f db/docker/Dockerfile -t ghcr.io/skoc10/ape-migrate:ci db
+          for image in api worker web migrate; do kind load docker-image ghcr.io/skoc10/ape-$image:ci --name ape-ci; done
+      - name: Install the CloudNativePG operator
+        run: |
+          helm repo add cnpg https://cloudnative-pg.github.io/charts
+          helm upgrade --install cnpg cnpg/cloudnative-pg -n cnpg-system --create-namespace --wait --timeout 5m
+      - name: helm install ape-control-plane
+        run: |
+          helm upgrade --install ape deploy/helm/ape-control-plane -n ape --create-namespace \
+            -f deploy/helm/ape-control-plane/ci/test-values.yaml --set image.tag=ci \
+            --set postgres.storage.size=1Gi --set s3.storage.size=1Gi --wait --timeout 12m
+          kubectl -n ape get pods
+      - name: Migrations ran with the three roles and forced RLS
+        run: |
+          kubectl -n ape logs job/ape-migrate-1 | tail -20
+          out=$(kubectl -n ape exec ape-pg-1 -c postgres -- psql -U postgres -d ape -Atc \
+            "select rolname || ':' || rolbypassrls || ':' || rolsuper from pg_roles where rolname like 'app_%' order by 1")
+          echo "$out"
+          test "$out" = "$(printf 'app_auth:false:false\napp_backend:false:false\napp_migrator:true:false')"
+          forced=$(kubectl -n ape exec ape-pg-1 -c postgres -- psql -U postgres -d ape -Atc \
+            "select count(*) from pg_class where relforcerowsecurity")
+          test "$forced" = "5"
+      - name: web, api and worker answer
+        run: |
+          kubectl -n ape rollout status deploy/ape-web deploy/ape-api deploy/ape-worker --timeout=180s
+          kubectl -n ape port-forward svc/ape-web 13000:3000 >/dev/null 2>&1 &
+          kubectl -n ape port-forward svc/ape-api 18000:8000 >/dev/null 2>&1 &
+          sleep 5
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:13000/sign-in)" = "200"
+          curl -sf http://127.0.0.1:13000/api/auth/jwks | grep -q '"keys"'
+          test "$(curl -s http://127.0.0.1:18000/readyz)" = '{"status":"ok"}'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18000/v1/me)" = "401"
+          kubectl -n ape logs deploy/ape-worker | grep -q worker_started
+      - name: Workloads are hardened and only the panel and the agent path are exposed
+        run: |
+          for d in web api worker; do
+            ctx=$(kubectl -n ape get deploy ape-$d -o jsonpath='{.spec.template.spec.containers[0].securityContext}')
+            echo "$d $ctx"
+            echo "$ctx" | grep -q '"readOnlyRootFilesystem":true'
+            echo "$ctx" | grep -q '"allowPrivilegeEscalation":false'
+          done
+          paths=$(kubectl -n ape get ingress ape -o jsonpath='{range .spec.rules[*].http.paths[*]}{.path}{" "}{end}')
+          test "$paths" = "/v1/agent / "
+      - name: Diagnostics
+        if: failure()
+        run: |
+          kubectl -n ape get pods,jobs,clusters.postgresql.cnpg.io -o wide || true
+          kubectl -n ape describe pods | tail -80 || true
+          for d in web api worker; do kubectl -n ape logs deploy/ape-$d --tail=30 || true; done
+          kubectl -n ape logs job/ape-migrate-1 --tail=40 || true

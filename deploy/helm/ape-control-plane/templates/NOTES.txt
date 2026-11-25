@@ -1,0 +1,11 @@
+Control Plane installed in namespace {{ .Release.Namespace }}.
+
+Panel:           {{ include "cp.publicUrl" . }}
+Agent endpoint:  {{ ternary "wss" "ws" .Values.ingress.tls.enabled }}://{{ .Values.host }}/v1/agent
+
+Check the rollout:
+  kubectl -n {{ .Release.Namespace }} get pods
+  kubectl -n {{ .Release.Namespace }} logs job/{{ .Release.Name }}-migrate-{{ .Release.Revision }}
+
+The Secret {{ include "cp.secretName" . }} holds generated keys (MASKING_KEY, database passwords).
+Back it up: it is kept when the release is uninstalled and must not change afterwards.

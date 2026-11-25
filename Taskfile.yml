@@ -186,9 +186,17 @@ tasks:
       - kubectl --context kind-{{.KIND_CLUSTER}} apply -f testdata/vulnerable/manifests/
 
   images:
-    desc: Build container images locally (api, web and worker images land in task 1.6)
+    desc: Build the agent image locally
     cmds:
       - docker build -t ghcr.io/skoc10/ape-agent:dev --build-arg VERSION=dev agent
+
+  images:control-plane:
+    desc: Build the Control Plane images (api, worker, web, migrate)
+    cmds:
+      - docker build --target api -t ghcr.io/skoc10/ape-api:dev apps/api
+      - docker build --target worker -t ghcr.io/skoc10/ape-worker:dev apps/api
+      - docker build -t ghcr.io/skoc10/ape-web:dev apps/web
+      - docker build -f db/docker/Dockerfile -t ghcr.io/skoc10/ape-migrate:dev db
 
   kind-agent:
     desc: Install the agent chart on the local kind cluster (TOKEN=... ENDPOINT=ws://<host>:8000/v1/agent)
