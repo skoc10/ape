@@ -39,6 +39,18 @@ class Settings(BaseSettings):
     # Master key for masking placeholders; a per-tenant key is derived from it.
     masking_key: str = ""
 
+    # LLM enrichment. Empty LLM_PROVIDER switches it off: reports are then built from the
+    # rule engine and template texts only. "anthropic" talks to Claude (requires ZDR for
+    # customer data); "openai_compatible" talks to vLLM, Ollama, LiteLLM or OpenAI through
+    # LLM_BASE_URL.
+    llm_provider: str = ""
+    llm_model: str = "claude-sonnet-5-5"
+    llm_base_url: str = ""
+    llm_api_key: str = ""
+    llm_batch_size: int = 25
+    llm_max_tokens_per_run: int = 300_000
+    llm_request_timeout_seconds: float = 180.0
+
     # Worker (queue consumer for rules, LLM and reports).
     worker_poll_seconds: float = 2.0
     worker_stale_after_seconds: int = 600

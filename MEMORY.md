@@ -252,7 +252,46 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
 - **Süreç:** `python -m ape.worker` ayrı süreç, aynı anda tek iş, kendi `/metrics` portu (9091):
   `ape_audit_runs_total{status}`, `ape_audit_stage_seconds{stage}`.
 
+### 3.5 PydanticAI analiz ajanı ve model soyutlaması (2026-11-25)
+
+- **pydantic-ai-slim 2.x** (`anthropic` ve `openai` ekleriyle). Model `ape/analysis/model.py`
+  içinde yalnızca ortam değişkenlerinden kurulur: `LLM_PROVIDER` boşsa LLM kapalı, `anthropic`
+  ise `AnthropicModel` (varsayılan `claude-sonnet-5-5`), `openai_compatible` ise `LLM_BASE_URL`
+  ile `OpenAIChatModel` (vLLM, Ollama, LiteLLM).
+- **Modele giden veri:** bulgu başına kural kanıtı ve ilgili kaynağın `status` ve gürültü metadata'sı
+  atılmış, 6000 karakterle sınırlı manifest özeti. Snapshot'ın tamamı gitmez. Modeli çağıran tek
+  fonksiyon `MaskedPayload` dışında tip kabul etmez; payload çıkışta bir kez daha maskelenir
+  (maskelenmemiş girdiyle bile ekili sırların prompt'a ulaşmadığı testli).
+- **Çıktı doğrulama:** bilinmeyen fingerprint atılır; yama yalnızca YAML mapping ise ve hedefi
+  bulgunun kendi kaynağıysa tutulur, aksi halde yalnızca yama düşer. Model `severity` ve `title`
+  değiştirebilir, bulgu ekleyemez.
+- **Dayanıklılık:** 25'lik gruplar; grup hatası (API, şema, zaman aşımı) yalnızca o grubu şablon
+  metne düşürür. Çalışma başına token tavanı `LLM_MAX_TOKENS_PER_RUN` (300k); aşılınca kalan
+  gruplar şablon alır. LLM kapalı ya da erişilemezken audit yine `completed` olur.
+- **Kayıt:** `stats.llm` (model, token, zenginleştirilen/şablon sayısı, atılanlar), `stats.summary`,
+  `stats.top_risks`; metrik `ape_llm_tokens_total{model,direction}`. `business_impact`
+  ayrı sütun olmadığı için `explanation` metnine eklenir.
+- **Prompt injection:** manifest içeriği "veri" olarak işaretli; asıl koruma çıktı doğrulaması ve
+  PR'ın insan onayından geçmesi.
+- **Doğrulanamayan:** gerçek Claude çağrısı (bu ortamda API anahtarı yok). Kod yolu betikli
+  modellerle ve yerel Ollama ile sınandı. `task eval` (iki modelin altın çıktı karşılaştırması)
+  henüz yok, backlog.
+
+### 3.6 Bulgu ekranı (2026-11-25)
+
+- `GET /v1/audits/{run_id}/findings?severity=&category=`; "recurring" okuma anında hesaplanır.
+- Panel: `/[orgSlug]/audits/[runId]` durum rozeti ve 3 sn'lik yenileme (çalışma sürerken), özet,
+  önem ve kategori filtresi (URL parametresi), her bulguda açıklama, düzeltme, yama ve
+  "recurring" rozeti. Cluster sayfasındaki audit satırları bu sayfaya bağlanır.
+- Uçtan uca test artık worker'ı da kapsıyor: kind üzerindeki kötü manifest seti için beklenen
+  18 bulgu birebir çıkıyor, `clean-app` temiz, ekili sırlar ne snapshot'ta ne bulgularda.
+
 ## Kullanıcı Aksiyonu Gerekenler
+
+- **Claude API anahtarı ve ZDR onayı (3.5).** LLM zenginleştirmesini açmak için worker'a
+  `LLM_PROVIDER=anthropic` ve `LLM_API_KEY` verilmeli; müşteri verisi gideceği için hesapta Zero
+  Data Retention'ın açık olduğu yazılı olarak doğrulanmalı (4.5 DoD). O zamana kadar raporlar
+  şablon açıklamalarla üretiliyor. Alternatif: yerel model (`openai_compatible`).
 
 - **`MASKING_KEY` (prod).** `.env.example` içindeki değer yalnızca yerel içindir; prod için
   `openssl rand -base64 32` ile üretilip Secret'a konmalı ve sonradan değiştirilmemeli

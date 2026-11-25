@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 import structlog
@@ -10,7 +10,7 @@ from ape.core.db import Database
 from ape.core.deps import CurrentPrincipal
 from ape.gateway.endpoint import AuditNotStartable, start_collection
 from ape.gateway.sessions import SessionRegistry
-from ape.repos import audit_runs, clusters
+from ape.repos import audit_runs, clusters, findings
 
 router = APIRouter(prefix="/v1", tags=["audits"])
 log = structlog.get_logger(__name__)
@@ -89,3 +89,41 @@ async def get_audit(run_id: UUID, principal: CurrentPrincipal, db: Db) -> AuditR
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "audit not found")
     return AuditRunOut.model_validate(row)
+
+
+class FindingOut(BaseModel):
+    id: UUID
+    rule_id: str
+    category: str
+    severity: str
+    title: str
+    resource_kind: str
+    resource_ns: str | None
+    resource_name: str
+    evidence: dict[str, Any]
+    explanation: str | None
+    remediation: str | None
+    patch: str | None
+    fingerprint: str
+    status: str
+    # The same rule fired for the same resource in an earlier audit of this cluster.
+    recurring: bool
+
+
+Severity = Literal["critical", "high", "medium", "low", "info"]
+Category = Literal["security", "rbac", "network", "cost", "reliability"]
+
+
+@router.get("/audits/{run_id}/findings")
+async def list_findings(
+    run_id: UUID,
+    principal: CurrentPrincipal,
+    db: Db,
+    severity: Severity | None = None,
+    category: Category | None = None,
+) -> list[FindingOut]:
+    async with db.tenant(principal.org_id) as tc:
+        if await audit_runs.get(tc, run_id) is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "audit not found")
+        rows = await findings.list_for_run(tc, run_id, severity=severity, category=category)
+    return [FindingOut.model_validate(r) for r in rows]

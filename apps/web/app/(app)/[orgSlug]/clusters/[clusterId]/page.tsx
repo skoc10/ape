@@ -42,6 +42,7 @@ export default async function Page({ params }: PageProps<"/[orgSlug]/clusters/[c
           id: run.id,
           status: run.status,
           objects: run.stats.objects ?? null,
+          findings: run.stats.findings?.total ?? null,
           redactions: run.stats.redactions
             ? Object.values(run.stats.redactions).reduce((sum, n) => sum + n, 0)
             : null,

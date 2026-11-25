@@ -7,11 +7,14 @@ once its lock is older than WORKER_STALE_AFTER_SECONDS.
 """
 
 import asyncio
+import os
 import signal
 
 import structlog
 from prometheus_client import start_http_server
 
+from ape.analysis.analyst import Analyst
+from ape.analysis.model import build_model
 from ape.analysis.pipeline import Pipeline
 from ape.core.config import Settings, get_settings
 from ape.core.db import Database
@@ -51,13 +54,19 @@ async def serve(settings: Settings) -> None:
     start_http_server(settings.worker_metrics_port, registry=metrics.registry)
     log.info("worker_started", metrics_port=settings.worker_metrics_port)
     try:
-        await run_worker(Pipeline(settings, db, ObjectStore(settings), metrics), stop)
+        analyst = Analyst(settings, db, metrics, build_model(settings))
+        log.info(
+            "llm_configured", provider=settings.llm_provider or "none", model=settings.llm_model
+        )
+        pipeline = Pipeline(settings, db, ObjectStore(settings), metrics, enrich=analyst.enrich_run)
+        await run_worker(pipeline, stop)
     finally:
         await db.close()
         log.info("worker_stopped")
 
 
 def main() -> None:
+    os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
     settings = get_settings()
     configure_logging("ape-worker", settings.log_level)
     asyncio.run(serve(settings))

@@ -10,6 +10,7 @@ on:
       - "db/**"
       - "deploy/**"
       - "packages/protocol/**"
+      - "testdata/**"
       - ".github/workflows/e2e.yml"
   pull_request:
     paths:
@@ -19,6 +20,7 @@ on:
       - "db/**"
       - "deploy/**"
       - "packages/protocol/**"
+      - "testdata/**"
       - ".github/workflows/e2e.yml"
 permissions:
   contents: read
@@ -61,6 +63,7 @@ jobs:
         run: |
           set -a; . ./.env; set +a
           (cd apps/api && uv sync --frozen && uv run uvicorn ape.server:app --factory --host 0.0.0.0 --port 8000 > /tmp/api.log 2>&1 &)
+          (cd apps/api && sleep 20 && uv run python -m ape.worker > /tmp/worker.log 2>&1 &)
           (cd apps/web && pnpm install --frozen-lockfile && pnpm build && (pnpm start > /tmp/web.log 2>&1 &))
           for i in $(seq 1 60); do
             curl -sf -o /dev/null http://localhost:3000/sign-in && curl -sf -o /dev/null http://localhost:8000/readyz && break
@@ -76,4 +79,4 @@ jobs:
         if: failure()
         run: |
           kubectl -n ape-system logs deploy/ape-agent --tail=50 || true
-          tail -50 /tmp/api.log /tmp/web.log || true
+          tail -50 /tmp/api.log /tmp/web.log /tmp/worker.log || true

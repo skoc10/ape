@@ -135,7 +135,7 @@ tasks:
   test:api:
     desc: API tests (need `task infra:up` and `task db:migrate`)
     dir: apps/api
-    cmds: [uv run pytest -q]
+    cmds: [PYDANTIC_AI_NO_BANNER=1 uv run pytest -q]
 
   test:agent:
     dir: agent

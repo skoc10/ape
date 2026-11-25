@@ -67,6 +67,7 @@ console.log("ok - cluster and agent token created through the API");
 
 // --- data plane: sample workload and the agent chart -----------------------------
 sh("kubectl", ["--context", KUBE_CONTEXT, "apply", "-f", "deploy/kind/sample-workload.yaml"]);
+sh("kubectl", ["--context", KUBE_CONTEXT, "apply", "-f", "testdata/vulnerable/manifests/"]);
 sh("helm", [
   "--kube-context", KUBE_CONTEXT, "upgrade", "--install", "ape-agent", "deploy/helm/ape-agent",
   "-n", "ape-system", "--create-namespace",
@@ -86,11 +87,11 @@ console.log(`ok - panel shows the cluster connected (Kubernetes ${connected.k8s_
 // --- audit ----------------------------------------------------------------------
 const started = await api(`/v1/clusters/${cluster.id}/audits`, "POST");
 assert.equal(started.status, 201, JSON.stringify(started.data));
-const audit = await until("collection to finish", async () => {
+const audit = await until("collection and analysis to finish", async () => {
   const { data } = await api(`/v1/audits/${started.data.id}`);
   if (data.status === "failed") throw new Error(`audit failed: ${data.error}`);
-  return data.status === "collected" && data;
-});
+  return data.status === "completed" && data;
+}, 180);
 assert.ok(audit.stats.objects > 20, `only ${audit.stats.objects} objects collected`);
 assert.ok(audit.stats.counts.Pod > 0 && audit.stats.counts.ClusterRole > 0 && audit.stats.counts.Node > 0);
 console.log(`ok - audit collected ${audit.stats.objects} objects in ${audit.stats.chunks} chunks, redactions: ${JSON.stringify(audit.stats.redactions)}`);
@@ -118,5 +119,34 @@ assert.match(leaky.metadata.annotations["example.com/api-token"], /^<secret:key_
 assert.match(leaky.metadata.annotations["example.com/ca"], /<secret:pem:[0-9a-f]{4}>/);
 assert.ok(!snapshot.objects.some((o) => o.kind === "Secret" || o.kind === "ConfigMap"));
 console.log(`ok - snapshot ${key} holds ${snapshot.objects.length} masked objects and none of the planted secrets`);
+
+// --- the worker analysed the snapshot: findings for the vulnerable set ----------------
+const expectedYaml = execFileSync(
+  "uv",
+  ["run", "python", "-c", "import json,sys,yaml; print(json.dumps(yaml.safe_load(open(sys.argv[1]))))", `${REPO}testdata/vulnerable/expected.yaml`],
+  { cwd: `${REPO}apps/api` },
+).toString();
+const expected = Object.entries(JSON.parse(expectedYaml)).flatMap(([rule, refs]) => refs.map((ref) => `${rule} ${ref}`)).sort();
+const findings = (await api(`/v1/audits/${audit.id}/findings`)).data;
+const inSet = (f) => /^vuln-/.test(f.resource_ns ?? "") || /^vuln-/.test(f.resource_name);
+const actual = findings.filter(inSet).map((f) => `${f.rule_id} ${f.resource_kind}/${f.resource_ns ?? "-"}/${f.resource_name}`).sort();
+assert.deepEqual(actual, expected);
+assert.ok(!findings.some((f) => f.resource_ns === "clean-app" || f.resource_name === "clean-app"), "negative control namespace has findings");
+assert.ok(findings.every((f) => f.explanation && f.remediation));
+assert.equal(audit.stats.findings.total, findings.length);
+console.log(`ok - worker produced ${findings.length} findings; the ${expected.length} expected ones for the vulnerable set match exactly, clean-app is clean`);
+
+const planted = execFileSync("cat", [`${REPO}testdata/vulnerable/planted-secrets.txt`]).toString().split(/\s+/).filter(Boolean);
+const everything = JSON.stringify(findings) + text;
+for (const secret of planted) assert.ok(!everything.includes(secret), `planted secret ${secret} leaked`);
+console.log("ok - none of the vulnerable set's planted secrets is in the snapshot or in the findings");
+
+const page = await fetch(`${WEB}/e2e-${run}/audits/${audit.id}`, {
+  headers: { Cookie: [...cookies].map(([k, v]) => `${k}=${v}`).join("; ") },
+});
+assert.equal(page.status, 200);
+const html = await page.text();
+assert.ok(html.includes("Privileged container") && html.includes("storefront") && html.includes("How to fix"));
+console.log("ok - the audit page lists the findings with explanations");
 
 console.log("\ne2e collection test passed");
