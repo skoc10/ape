@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Pod
+metadata: {name: crashed, namespace: prod}
+status:
+  containerStatuses:
+    - name: app
+      lastState:
+        terminated:
+          exitCode: 2
+          message: "panic: upstream rejected token=${API_TOKEN} for ${EMAIL_DEV}"

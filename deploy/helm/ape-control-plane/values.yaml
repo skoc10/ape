@@ -1,0 +1,111 @@
+# -- Public host name of the panel, e.g. cp.example.com (required).
+host: ""
+
+image:
+  registry: ghcr.io/skoc10
+  # -- Defaults to the chart appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+ingress:
+  enabled: true
+  # -- k3s ships Traefik.
+  className: traefik
+  tls:
+    enabled: true
+    # -- cert-manager ClusterIssuer that signs the certificate (see deploy/k3s).
+    clusterIssuer: letsencrypt
+    secretName: ape-control-plane-tls
+  annotations: {}
+
+web:
+  replicas: 1
+  resources:
+    requests: {cpu: 50m, memory: 192Mi}
+    limits: {memory: 512Mi}
+
+api:
+  # One instance: agent sessions are held in memory (see mvp-plan.md).
+  resources:
+    requests: {cpu: 50m, memory: 192Mi}
+    limits: {memory: 512Mi}
+
+worker:
+  # One job at a time. If a report or LLM call exhausts this limit only the worker restarts.
+  resources:
+    requests: {cpu: 50m, memory: 256Mi}
+    limits: {memory: 1Gi}
+
+postgres:
+  # -- "cnpg" creates a CloudNativePG Cluster (the operator must be installed);
+  #    "external" uses postgres.external.* and creates nothing.
+  mode: cnpg
+  database: ape
+  instances: 1
+  image: ghcr.io/cloudnative-pg/postgresql:16
+  storage:
+    size: 10Gi
+    storageClass: ""
+  backup:
+    # -- Daily base backup and WAL archive to the S3 storage below.
+    enabled: false
+    schedule: "0 0 3 * * *"
+    retentionPolicy: 14d
+    bucket: backups
+  external:
+    host: ""
+    port: 5432
+    sslmode: verify-full
+    # -- Secret with username/password of a superuser, only needed to create the roles.
+    superuserSecret: ""
+
+s3:
+  # -- "seaweedfs" runs a single-node SeaweedFS in the cluster; "external" uses s3.external.*.
+  mode: seaweedfs
+  image: chrislusf/seaweedfs:4.55
+  storage:
+    size: 20Gi
+    storageClass: ""
+  # -- Public host for presigned report downloads (gets its own Ingress rule), e.g. files.example.com.
+  publicHost: ""
+  buckets:
+    snapshots: snapshots
+    reports: reports
+  external:
+    endpointUrl: ""
+    region: us-east-1
+
+# Generated on first install and kept across upgrades when left empty.
+secrets:
+  # -- Use an existing Secret instead (same keys as templates/secrets.yaml).
+  existingSecret: ""
+  betterAuthSecret: ""
+  maskingKey: ""
+
+agent:
+  # -- Chart reference shown in the "Add cluster" wizard.
+  chartRef: oci://ghcr.io/skoc10/charts/ape-agent
+
+llm:
+  # -- "", "anthropic" or "openai_compatible". Empty: template explanations only.
+  provider: ""
+  model: claude-sonnet-5-5
+  baseUrl: ""
+  # -- Secret with key LLM_API_KEY.
+  apiKeySecret: ""
+
+github:
+  # -- Secret with GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_APP_CLIENT_ID,
+  #    GITHUB_APP_CLIENT_SECRET, GITHUB_APP_PRIVATE_KEY. Empty: feature off.
+  existingSecret: ""
+
+observability:
+  otlpEndpoint: ""
+  serviceMonitor:
+    enabled: false
+    labels: {}
+
+migrations:
+  # -- Create or refresh the three database roles before migrating (needs superuser access).
+  bootstrapRoles: true

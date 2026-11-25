@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Pod
+metadata: {name: runner, namespace: ci}
+spec:
+  containers:
+    - name: runner
+      image: ghcr.io/actions/runner:2.320.0
+      env:
+        - {name: GH, value: "${GITHUB_PAT}"}
+        - {name: RUNNER_PAT, value: "${GITHUB_FINE}"}

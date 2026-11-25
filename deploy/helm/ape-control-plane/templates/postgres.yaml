@@ -1,0 +1,54 @@
+{{- if eq .Values.postgres.mode "cnpg" }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ .Release.Name }}-pg
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cp.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.postgres.instances }}
+  imageName: {{ .Values.postgres.image }}
+  # Superuser access is used only by the migration job, to create the three roles.
+  enableSuperuserAccess: true
+  bootstrap:
+    initdb:
+      database: {{ .Values.postgres.database }}
+      owner: app_migrator
+  storage:
+    size: {{ .Values.postgres.storage.size }}
+    {{- with .Values.postgres.storage.storageClass }}
+    storageClass: {{ . }}
+    {{- end }}
+  {{- if .Values.postgres.backup.enabled }}
+  backup:
+    retentionPolicy: {{ .Values.postgres.backup.retentionPolicy | quote }}
+    barmanObjectStore:
+      destinationPath: s3://{{ .Values.postgres.backup.bucket }}/
+      endpointURL: {{ include "cp.s3Endpoint" . }}
+      s3Credentials:
+        accessKeyId:
+          name: {{ include "cp.secretName" . }}
+          key: S3_ACCESS_KEY
+        secretAccessKey:
+          name: {{ include "cp.secretName" . }}
+          key: S3_SECRET_KEY
+      wal:
+        compression: gzip
+  {{- end }}
+{{- if .Values.postgres.backup.enabled }}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: {{ .Release.Name }}-pg-daily
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cp.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.postgres.backup.schedule | quote }}
+  backupOwnerReference: self
+  cluster:
+    name: {{ .Release.Name }}-pg
+{{- end }}
+{{- end }}

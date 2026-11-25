@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "type": "hello_ack",
+  "id": "01JDKX5N8Q4V7YH2M3R6T9WZA1",
+  "ts": "2026-11-25T05:00:00Z",
+  "payload": {
+    "session_id": "01JDKX5N8Q4V7YH2M3R6T9WZAB",
+    "heartbeat_interval_seconds": 30,
+    "limits": {
+      "max_pods": 5000,
+      "max_compressed_bytes": 52428800,
+      "max_frame_bytes": 524288
+    }
+  }
+}

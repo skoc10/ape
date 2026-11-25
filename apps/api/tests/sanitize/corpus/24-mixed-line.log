@@ -1,0 +1,1 @@
+retry 3/5 url=redis://:${REDIS_PASSWORD}@redis:6379 auth_token=${API_TOKEN} notify=${EMAIL_OPS} jwt=${JWT}

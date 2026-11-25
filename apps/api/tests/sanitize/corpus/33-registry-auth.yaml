@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kaniko
+  namespace: ci
+spec:
+  containers:
+    - name: kaniko
+      image: acme/kaniko:1.23.0
+      env:
+        - name: DOCKER_CONFIG_INLINE
+          value: '{"auths":{"registry.example.com":{"auth":"${REGISTRY_AUTH}"}}}'
+  nodeSelector:
+    auth: "${REGISTRY_AUTH}"

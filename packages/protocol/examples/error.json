@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "type": "error",
+  "id": "01JDKX5N8Q4V7YH2M3R6T9WZA7",
+  "ts": "2026-11-25T05:00:00Z",
+  "payload": {
+    "run_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "code": "forbidden",
+    "message": "cannot list pods"
+  }
+}

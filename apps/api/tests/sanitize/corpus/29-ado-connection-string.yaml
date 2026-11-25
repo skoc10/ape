@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Pod
+metadata: {name: dotnet, namespace: prod}
+spec:
+  containers:
+    - name: app
+      image: mcr.microsoft.com/dotnet/aspnet:9.0
+      env:
+        - name: ConnectionStrings__Default
+          value: "Server=sql.prod.svc;Database=app;User Id=sa;Password=${DB_PASSWORD};Encrypt=true"

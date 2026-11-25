@@ -1,0 +1,93 @@
+# SEC-001 privileged, SEC-002 host access, SEC-003 root, SEC-004 privilege escalation,
+# SEC-005 mutable image tag. Also COST-001 (no resources), REL-001 (no probes), REL-002.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: storefront
+  namespace: vuln-shop
+  annotations:
+    example.com/deploy-token: vulnset-annotation-token-77aa11
+    example.com/dsn: postgres://shop:vulnset-dsn-password-55cc@db.vuln-shop.svc:5432/shop
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: storefront}
+  template:
+    metadata:
+      labels: {app: storefront}
+    spec:
+      hostNetwork: true
+      hostPID: true
+      containers:
+        - name: web
+          image: registry.k8s.io/pause:latest
+          args:
+            - --session-secret=vulnset-arg-secret-9d8c7b
+            - --upstream=https://api:vulnset-url-password-3e3e@payments.example.com/v1
+          env:
+            - name: DB_PASSWORD
+              value: vulnset-env-password-1f2e3d
+            - name: AWS_ACCESS_KEY_ID
+              value: AKIAIOSFODNN7EXAMPLE
+            - name: STRIPE_KEY
+              valueFrom:
+                secretKeyRef: {name: storefront-secrets, key: stripe}
+          securityContext:
+            privileged: true
+            allowPrivilegeEscalation: true
+            runAsUser: 0
+          volumeMounts:
+            - {name: docker-sock, mountPath: /var/run/docker.sock}
+        - name: sidecar
+          image: registry.k8s.io/pause
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "curl -H 'Authorization: Bearer vulnset-probe-bearer-4b4b' localhost"]
+      volumes:
+        - name: docker-sock
+          hostPath: {path: /var/run/docker.sock}
+---
+# A second workload that is only wrong in one way, to check that rules do not over-report.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: orders-db
+  namespace: vuln-shop
+spec:
+  serviceName: orders-db
+  replicas: 3
+  selector:
+    matchLabels: {app: orders-db}
+  template:
+    metadata:
+      labels: {app: orders-db}
+    spec:
+      serviceAccountName: orders-db
+      automountServiceAccountToken: false
+      securityContext: {runAsNonRoot: true, runAsUser: 10001}
+      containers:
+        - name: db
+          image: registry.k8s.io/pause:3.10
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 32Mi}
+          readinessProbe: {tcpSocket: {port: 5432}}
+          # liveness probe missing -> REL-001 only
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: orders-db
+  namespace: vuln-shop
+automountServiceAccountToken: false
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: orders-db
+  namespace: vuln-shop
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels: {app: orders-db}

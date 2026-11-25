@@ -1,0 +1,1 @@
++ mysqldump -h db.internal -u backup -p${DB_PASSWORD} --single-transaction app

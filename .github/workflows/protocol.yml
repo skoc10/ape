@@ -1,0 +1,39 @@
+name: protocol
+on:
+  push:
+    paths:
+      - "packages/protocol/**"
+      - "agent/internal/protocol/**"
+      - "apps/api/ape/gateway/protocol_gen.py"
+      - "Taskfile.yml"
+      - ".github/workflows/protocol.yml"
+  pull_request:
+    paths:
+      - "packages/protocol/**"
+      - "agent/internal/protocol/**"
+      - "apps/api/ape/gateway/protocol_gen.py"
+      - "Taskfile.yml"
+      - ".github/workflows/protocol.yml"
+permissions:
+  contents: read
+concurrency:
+  group: protocol-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  generated-code-is-current:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+          cache: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: false
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: cd apps/api && uv sync --frozen
+      - run: task gen:check

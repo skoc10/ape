@@ -1,0 +1,52 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "ape-agent.name" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ape-agent.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "ape-agent.selectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  # No ingress at all, unless metrics scraping is switched on.
+  ingress:
+    {{- if .Values.metrics.enabled }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.metrics.allowedNamespace }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.metrics.port }}
+    {{- else }}
+    []
+    {{- end }}
+  egress:
+    # DNS
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Control Plane and the Kubernetes API
+    - ports:
+        {{- range .Values.networkPolicy.egressPorts }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+      {{- with .Values.networkPolicy.controlPlaneCIDRs }}
+      to:
+        {{- range . }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      {{- end }}
+{{- end }}

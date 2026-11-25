@@ -1,0 +1,11 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: notifier, namespace: ops}
+spec:
+  template:
+    spec:
+      containers:
+        - name: notifier
+          image: acme/notifier:1.0.3
+          env:
+            - {name: NOTIFIER, value: "${SLACK_BOT}"}

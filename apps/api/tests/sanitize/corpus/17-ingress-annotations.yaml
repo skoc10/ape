@@ -1,0 +1,9 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: admin
+  namespace: prod
+  annotations:
+    example.com/basic-auth-password: "${DB_PASSWORD}"
+    example.com/webhook-secret: "${WEBHOOK_SECRET}"
+spec: {rules: []}

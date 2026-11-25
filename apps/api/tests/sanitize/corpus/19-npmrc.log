@@ -1,0 +1,2 @@
+npm verb config loaded //registry.npmjs.org/:_authToken=${RANDOM_TOKEN}
+npm verb cli /usr/local/bin/node

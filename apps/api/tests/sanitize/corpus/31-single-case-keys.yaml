@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Pod
+metadata: {name: otp, namespace: prod}
+spec:
+  containers:
+    - name: otp
+      image: acme/otp:2.0.1
+      env:
+        - {name: SIGNING, value: "${LOWER_DIGIT_KEY}"}
+        - {name: TOTP_SEED, value: "${UPPER_DIGIT_SEED}"}
+        - {name: PEPPER, value: "${LETTERS_KEY}"}
+        - {name: SALT, value: "${API_TOKEN}"}
+        - {name: NONCE, value: "${SHORT_TOKEN}"}

@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vuln-shop        # no NetworkPolicy at all -> NET-001
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vuln-batch       # no NetworkPolicy at all -> NET-001
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: clean-app        # negative control

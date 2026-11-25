@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-web
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cp.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.web.replicas }}
+  selector:
+    matchLabels:
+      {{- include "cp.selector" (dict "root" . "component" "web") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cp.labels" . | nindent 8 }}
+        {{- include "cp.selector" (dict "root" . "component" "web") | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- include "cp.podSecurity" . | nindent 8 }}
+      containers:
+        - name: web
+          image: {{ include "cp.image" (dict "root" . "name" "ape-web") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- include "cp.containerSecurity" . | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: BETTER_AUTH_URL
+              value: {{ include "cp.publicUrl" . | quote }}
+            {{- include "cp.secretEnv" (dict "root" . "name" "BETTER_AUTH_SECRET") | nindent 12 }}
+            {{- include "cp.secretEnv" (dict "root" . "name" "APP_AUTH_PASSWORD") | nindent 12 }}
+            - name: AUTH_DATABASE_URL
+              value: "postgres://app_auth:$(APP_AUTH_PASSWORD)@{{ include "cp.pgHost" . }}:{{ include "cp.pgPort" . }}/{{ .Values.postgres.database }}?sslmode={{ include "cp.pgSslmode" . }}&uselibpqcompat=true"
+            - name: API_URL
+              value: "http://{{ .Release.Name }}-api:8000"
+            - name: AGENT_ENDPOINT
+              value: "{{ ternary "wss" "ws" .Values.ingress.tls.enabled }}://{{ .Values.host }}/v1/agent"
+            - name: AGENT_CHART_REF
+              value: {{ .Values.agent.chartRef | quote }}
+          readinessProbe:
+            httpGet: {path: /sign-in, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: {port: http}
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.web.resources | nindent 12 }}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-web
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  selector:
+    {{- include "cp.selector" (dict "root" . "component" "web") | nindent 4 }}
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http

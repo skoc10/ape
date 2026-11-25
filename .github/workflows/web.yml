@@ -1,0 +1,85 @@
+name: web
+on:
+  push:
+    paths: ["apps/web/**", "apps/api/**", "db/migrations/**", ".github/workflows/web.yml"]
+  pull_request:
+    paths: ["apps/web/**", "apps/api/**", "db/migrations/**", ".github/workflows/web.yml"]
+permissions:
+  contents: read
+concurrency:
+  group: web-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  lint-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: apps/web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm exec next typegen
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm build
+        env:
+          # Build-time placeholder only; Better Auth refuses to build with its default secret.
+          BETTER_AUTH_SECRET: ci-build-placeholder-not-a-real-secret-0000
+          BETTER_AUTH_URL: http://localhost:3000
+
+  # Sign-up, organizations, invitations, JWT and JWKS against a real database.
+  auth-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: apps/web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+      - name: Start PostgreSQL and apply migrations
+        run: |
+          cp .env.example .env
+          docker compose -f deploy/compose/docker-compose.yml --env-file .env up -d --build --wait postgres
+          set -a; . ./.env; set +a
+          docker run --rm --network host -v "$PWD/db:/db:ro" ghcr.io/amacneil/dbmate:2 \
+            --url "$MIGRATOR_DATABASE_URL" --migrations-dir /db/migrations --no-dump-schema up
+      - name: Build and start the web app
+        working-directory: apps/web
+        run: |
+          set -a; . ../../.env; set +a
+          pnpm install --frozen-lockfile
+          pnpm build
+          pnpm start > /tmp/web.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf -o /dev/null http://localhost:3000/sign-in && break; sleep 1; done
+      - uses: astral-sh/setup-uv@v6
+        with:
+          # No cache here: the post-run cache step fails this job otherwise.
+          enable-cache: false
+      - name: Start the API
+        working-directory: apps/api
+        run: |
+          set -a; . ../../.env; set +a
+          uv sync --frozen --no-dev
+          MEMBERSHIP_CACHE_TTL_SECONDS=3 uv run --no-dev uvicorn ape.server:app --factory --port 8000 > /tmp/api.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf -o /dev/null http://localhost:8000/readyz && break; sleep 1; done
+      - name: Auth smoke test (web + api)
+        working-directory: apps/web
+        env:
+          SMOKE_API_URL: http://localhost:8000
+        run: node scripts/auth-smoke.mjs http://localhost:3000
+      - name: Server logs
+        if: failure()
+        run: cat /tmp/web.log /tmp/api.log

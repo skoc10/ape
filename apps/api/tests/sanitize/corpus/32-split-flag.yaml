@@ -1,0 +1,11 @@
+apiVersion: batch/v1
+kind: Job
+metadata: {name: migrate, namespace: prod}
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: acme/migrate:4.1.0
+          args: ["--db-user", "migrator", "--db-password", "${DB_PASSWORD}", "--verbose"]

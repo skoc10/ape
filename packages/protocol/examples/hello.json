@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "type": "hello",
+  "id": "01JDKX5N8Q4V7YH2M3R6T9WZA0",
+  "ts": "2026-11-25T05:00:00Z",
+  "payload": {
+    "agent_version": "0.1.0",
+    "k8s_version": "v1.31.2",
+    "node_count": 3,
+    "capabilities": [
+      "metrics"
+    ]
+  }
+}

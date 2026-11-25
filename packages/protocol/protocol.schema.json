@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/skoc10/ape/packages/protocol/protocol.schema.json",
+  "title": "APE agent protocol v1",
+  "description": "Messages exchanged between the Data Plane agent and the Control Plane over one WebSocket. Every message is a JSON text frame of at most 512 KiB: an Envelope whose payload is the *Payload type selected by `type`. The agent always opens the connection; the Control Plane can only ask for a predefined collection.",
+  "type": "object",
+  "$defs": {
+    "MessageType": {
+      "description": "Discriminator of the payload carried by an envelope.",
+      "type": "string",
+      "enum": [
+        "hello",
+        "hello_ack",
+        "ping",
+        "pong",
+        "collect_request",
+        "collect_chunk",
+        "collect_done",
+        "error"
+      ]
+    },
+    "Envelope": {
+      "description": "Wrapper of every message.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "type", "id", "ts", "payload"],
+      "properties": {
+        "v": {
+          "description": "Protocol version. Always 1.",
+          "type": "integer",
+          "const": 1
+        },
+        "type": { "$ref": "#/$defs/MessageType" },
+        "id": {
+          "description": "ULID of this message.",
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "ts": {
+          "description": "Send time, RFC 3339.",
+          "type": "string",
+          "format": "date-time"
+        },
+        "payload": {
+          "description": "One of the *Payload objects, selected by `type`.",
+          "type": "object"
+        }
+      }
+    },
+    "HelloPayload": {
+      "description": "Agent -> CP, first message after the connection opens.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent_version", "k8s_version", "node_count", "capabilities"],
+      "properties": {
+        "agent_version": { "type": "string", "maxLength": 64 },
+        "k8s_version": { "type": "string", "maxLength": 64 },
+        "node_count": { "type": "integer", "minimum": 0 },
+        "capabilities": {
+          "description": "Optional features of this agent, e.g. `metrics` when metrics.k8s.io is available.",
+          "type": "array",
+          "maxItems": 32,
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "CollectLimits": {
+      "description": "Upper bounds the agent must respect during a collection.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_pods", "max_compressed_bytes", "max_frame_bytes"],
+      "properties": {
+        "max_pods": { "type": "integer", "minimum": 1 },
+        "max_compressed_bytes": { "type": "integer", "minimum": 1 },
+        "max_frame_bytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "HelloAckPayload": {
+      "description": "CP -> agent, answer to hello.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session_id", "heartbeat_interval_seconds", "limits"],
+      "properties": {
+        "session_id": { "type": "string", "maxLength": 64 },
+        "heartbeat_interval_seconds": { "type": "integer", "minimum": 1 },
+        "limits": { "$ref": "#/$defs/CollectLimits" }
+      }
+    },
+    "AgentHealth": {
+      "description": "Agent self-reported health, so the Control Plane never needs the customer's Prometheus.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "last_collect_seconds": {
+          "description": "Duration of the last collection, if any.",
+          "type": "number",
+          "minimum": 0
+        },
+        "error_count": {
+          "description": "Errors since the agent started.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "PingPayload": {
+      "description": "Either direction, every heartbeat interval. The peer answers with pong; 3 missed intervals drop the connection.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "health": { "$ref": "#/$defs/AgentHealth" }
+      }
+    },
+    "PongPayload": {
+      "description": "Answer to ping.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    },
+    "CollectRequestPayload": {
+      "description": "CP -> agent, the only command that exists: collect a fixed set of resource kinds.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "resources", "exclude_namespaces"],
+      "properties": {
+        "run_id": { "type": "string", "format": "uuid" },
+        "resources": {
+          "description": "Kubernetes kinds to collect, e.g. Pod, Deployment. Unknown kinds are ignored by the agent.",
+          "type": "array",
+          "maxItems": 64,
+          "items": { "type": "string" }
+        },
+        "exclude_namespaces": {
+          "type": "array",
+          "maxItems": 256,
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "CollectChunkPayload": {
+      "description": "Agent -> CP, one batch of whole Kubernetes objects of a single kind. An object is never split across chunks, so each chunk can be masked on arrival.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "seq", "kind", "count", "data"],
+      "properties": {
+        "run_id": { "type": "string", "format": "uuid" },
+        "seq": {
+          "description": "0-based position of this chunk in the run.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": { "type": "string", "maxLength": 64 },
+        "count": {
+          "description": "Number of objects in `data`.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "data": {
+          "description": "base64(gzip(JSON array of objects)).",
+          "type": "string",
+          "contentEncoding": "base64"
+        }
+      }
+    },
+    "CollectDonePayload": {
+      "description": "Agent -> CP, end of a collection.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "total_chunks", "counts", "sha256", "truncated"],
+      "properties": {
+        "run_id": { "type": "string", "format": "uuid" },
+        "total_chunks": { "type": "integer", "minimum": 0 },
+        "counts": {
+          "description": "Objects sent per kind.",
+          "type": "object",
+          "additionalProperties": { "type": "integer" }
+        },
+        "sha256": {
+          "description": "Hex SHA-256 over the gzip bytes of all chunks, concatenated in `seq` order.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "truncated": {
+          "description": "True when a collection limit was hit and some objects were left out.",
+          "type": "boolean"
+        }
+      }
+    },
+    "ErrorCode": {
+      "type": "string",
+      "enum": ["forbidden", "timeout", "limit_exceeded", "bad_request", "internal"]
+    },
+    "ErrorPayload": {
+      "description": "Agent -> CP, a collection (or the session, when run_id is absent) failed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "run_id": { "type": "string", "format": "uuid" },
+        "code": { "$ref": "#/$defs/ErrorCode" },
+        "message": {
+          "description": "Human readable, must not contain cluster object contents.",
+          "type": "string",
+          "maxLength": 512
+        }
+      }
+    }
+  }
+}

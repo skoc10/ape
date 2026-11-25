@@ -1,0 +1,7 @@
+ape-agent is installed in namespace {{ .Release.Namespace }}.
+
+It connects outbound to {{ .Values.endpoint }} and has read-only access:
+  kubectl auth can-i --list --as=system:serviceaccount:{{ .Release.Namespace }}:ape-agent
+
+Check the connection:
+  kubectl -n {{ .Release.Namespace }} logs deploy/ape-agent

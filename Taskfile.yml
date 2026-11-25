@@ -1,0 +1,223 @@
+# https://taskfile.dev — single entry point for the three languages in this repo.
+version: "3"
+
+dotenv: [".env"]
+
+vars:
+  COMPOSE:
+    sh: if docker compose version >/dev/null 2>&1; then echo "docker compose"; else echo "docker-compose"; fi
+  COMPOSE_FILE: deploy/compose/docker-compose.yml
+  KIND_CLUSTER: ape-dev
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds: [task --list]
+    silent: true
+
+  setup:
+    desc: Install dependencies for every app
+    cmds:
+      - cd apps/web && pnpm install --frozen-lockfile
+      - cd apps/api && uv sync
+      - cd agent && go mod download
+
+  # --- local infrastructure -------------------------------------------------
+  infra:up:
+    desc: Start PostgreSQL (with pgTAP) and S3 storage, wait until healthy (buckets are auto-created)
+    cmds:
+      - "{{.COMPOSE}} -f {{.COMPOSE_FILE}} --env-file .env up -d --build --wait postgres s3"
+
+  infra:down:
+    desc: Stop local infrastructure (keeps volumes)
+    cmds: ["{{.COMPOSE}} -f {{.COMPOSE_FILE}} --env-file .env down"]
+
+  infra:nuke:
+    desc: Stop local infrastructure and delete its volumes
+    cmds: ["{{.COMPOSE}} -f {{.COMPOSE_FILE}} --env-file .env down -v"]
+
+  # --- database --------------------------------------------------------------
+  db:bootstrap:
+    desc: Create or refresh the three application roles (superuser step, idempotent)
+    cmds:
+      - "{{.COMPOSE}} -f {{.COMPOSE_FILE}} --env-file .env exec -T postgres sh /docker-entrypoint-initdb.d/10-init-roles.sh"
+
+  db:migrate:
+    desc: Apply pending dbmate migrations as app_migrator
+    cmds:
+      - dbmate --url "$MIGRATOR_DATABASE_URL" --migrations-dir db/migrations --no-dump-schema up
+
+  db:seed:
+    desc: Load the two demo tenants
+    cmds:
+      - "{{.COMPOSE}} -f {{.COMPOSE_FILE}} --env-file .env exec -T -e PGPASSWORD=$APP_MIGRATOR_PASSWORD postgres psql -v ON_ERROR_STOP=1 -q -h 127.0.0.1 -U app_migrator -d $POSTGRES_DB -f /db/seed.sql"
+
+  db:reset:
+    desc: Drop the database and rebuild it from scratch (roles, migrations, seed)
+    cmds:
+      - "{{.COMPOSE}} -f {{.COMPOSE_FILE}} --env-file .env exec -T postgres psql -v ON_ERROR_STOP=1 -q -U $POSTGRES_USER -d postgres -c 'drop database if exists \"{{.DB}}\" with (force)' -c 'create database \"{{.DB}}\"'"
+      - task: db:bootstrap
+      - task: db:migrate
+      - task: db:seed
+    vars:
+      DB:
+        sh: echo "${POSTGRES_DB:-ape}"
+
+  db:test:
+    desc: Run the pgTAP tenant isolation tests
+    cmds:
+      - "{{.COMPOSE}} -f {{.COMPOSE_FILE}} --env-file .env exec -T postgres sh -c 'pg_prove -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" /db/tests/*.sql'"
+
+  dev:
+    desc: Start infrastructure, then web, api and worker with live reload
+    deps: [infra:up]
+    cmds:
+      - task --parallel dev:web dev:api dev:worker
+
+  dev:web:
+    dir: apps/web
+    cmds: [pnpm dev]
+
+  dev:api:
+    dir: apps/api
+    cmds: [uv run uvicorn ape.server:app --factory --reload --port 8000]
+
+  dev:worker:
+    dir: apps/api
+    cmds: [uv run python -m ape.worker]
+
+  # --- quality gates --------------------------------------------------------
+  lint:
+    desc: Run every linter
+    cmds:
+      - task: lint:web
+      - task: lint:api
+      - task: lint:agent
+
+  lint:web:
+    dir: apps/web
+    cmds: [pnpm lint, pnpm exec next typegen, pnpm exec tsc --noEmit]
+
+  lint:api:
+    dir: apps/api
+    cmds: [uv run ruff check ., uv run ruff format --check ., uv run mypy]
+
+  lint:agent:
+    dir: agent
+    cmds: [golangci-lint run ./...]
+
+  test:
+    desc: Run every test suite
+    cmds:
+      - task: test:web
+      - task: test:api
+      - task: test:agent
+      - task: db:test
+
+  test:web:
+    dir: apps/web
+    cmds: [pnpm test]
+
+  test:web:smoke:
+    desc: End-to-end auth smoke test (needs `task dev:web` or `next start` running and a migrated database)
+    dir: apps/web
+    cmds: [node scripts/auth-smoke.mjs]
+
+  test:e2e:
+    desc: End-to-end collection on kind (needs `task dev` with the api on 0.0.0.0, `task kind-up` and `task images`; set AGENT_ENDPOINT)
+    dir: apps/web
+    requires:
+      vars: [AGENT_ENDPOINT]
+    cmds:
+      - kind load docker-image ghcr.io/skoc10/ape-agent:dev --name {{.KIND_CLUSTER}}
+      - AGENT_ENDPOINT={{.AGENT_ENDPOINT}} node scripts/e2e-collect.mjs
+
+  test:api:
+    desc: API tests (need `task infra:up` and `task db:migrate`)
+    dir: apps/api
+    cmds: [PYDANTIC_AI_NO_BANNER=1 uv run pytest -q]
+
+  test:agent:
+    dir: agent
+    cmds: [go test ./...]
+
+  build:
+    desc: Build web and agent
+    cmds:
+      - cd apps/web && pnpm build
+      - cd agent && go build ./...
+
+  gen:
+    desc: Generate Go and Python types from packages/protocol (generators are pinned)
+    vars:
+      SCHEMA: packages/protocol/protocol.schema.json
+      PY_OUT: apps/api/ape/gateway/protocol_gen.py
+    cmds:
+      - cd agent && go run github.com/atombender/go-jsonschema@v0.24.1 -p protocol --only-models -o internal/protocol/types_gen.go ../{{.SCHEMA}}
+      - >-
+        uvx --from datamodel-code-generator==0.102.0 datamodel-codegen
+        --input {{.SCHEMA}} --input-file-type jsonschema --output {{.PY_OUT}}
+        --output-model-type pydantic_v2.BaseModel --target-python-version 3.12
+        --use-standard-collections --use-union-operator --disable-timestamp
+        --use-schema-description --field-constraints --collapse-root-models
+        --custom-file-header '# Generated from packages/protocol/protocol.schema.json by "task gen". DO NOT EDIT.'
+      - cd apps/api && uv run ruff format ape/gateway/protocol_gen.py && uv run ruff check --fix --quiet ape/gateway/protocol_gen.py
+
+  gen:check:
+    desc: Fail if generated protocol code is out of date
+    cmds:
+      - task: gen
+      - git diff --exit-code -- agent/internal/protocol/types_gen.go apps/api/ape/gateway/protocol_gen.py
+
+  # --- kubernetes -----------------------------------------------------------
+  kind-up:
+    desc: Create a local kind cluster for agent tests
+    status: ["kind get clusters | grep -qx {{.KIND_CLUSTER}}"]
+    cmds: ["kind create cluster --name {{.KIND_CLUSTER}}"]
+
+  kind-down:
+    desc: Delete the local kind cluster
+    cmds: ["kind delete cluster --name {{.KIND_CLUSTER}}"]
+
+  kind-vuln:
+    desc: Apply the deliberately misconfigured test set to the local kind cluster
+    deps: [kind-up]
+    cmds:
+      - kubectl --context kind-{{.KIND_CLUSTER}} apply -f testdata/vulnerable/manifests/
+
+  images:
+    desc: Build the agent image locally
+    cmds:
+      - docker build -t ghcr.io/skoc10/ape-agent:dev --build-arg VERSION=dev agent
+
+  images:control-plane:
+    desc: Build the Control Plane images (api, worker, web, migrate)
+    cmds:
+      - docker build --target api -t ghcr.io/skoc10/ape-api:dev apps/api
+      - docker build --target worker -t ghcr.io/skoc10/ape-worker:dev apps/api
+      - docker build -t ghcr.io/skoc10/ape-web:dev apps/web
+      - docker build -f db/docker/Dockerfile -t ghcr.io/skoc10/ape-migrate:dev db
+
+  kind-agent:
+    desc: Install the agent chart on the local kind cluster (TOKEN=... ENDPOINT=ws://<host>:8000/v1/agent)
+    deps: [kind-up, images]
+    requires:
+      vars: [TOKEN, ENDPOINT]
+    cmds:
+      - kind load docker-image ghcr.io/skoc10/ape-agent:dev --name {{.KIND_CLUSTER}}
+      - >-
+        helm --kube-context kind-{{.KIND_CLUSTER}} upgrade --install ape-agent deploy/helm/ape-agent
+        -n ape-system --create-namespace --set token={{.TOKEN}} --set endpoint={{.ENDPOINT}}
+        --set allowInsecure=true --set image.tag=dev
+        --set 'networkPolicy.egressPorts={443,6443,8000}' --wait --timeout 120s
+      - KUBECTL_CONTEXT=kind-{{.KIND_CLUSTER}} deploy/helm/ape-agent/ci/rbac-check.sh ape-system
+
+  helm-package:
+    desc: Lint and package the Helm charts that exist
+    cmds:
+      - |
+        for chart in deploy/helm/*/; do
+          if [ -f "$chart/Chart.yaml" ]; then
+            helm lint "$chart" -f "$chart/ci/test-values.yaml" && helm package "$chart" -d dist/charts
+          fi
+        done

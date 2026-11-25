@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Pod
+metadata: {name: mysql, namespace: prod}
+spec:
+  containers:
+    - name: mysql
+      image: mysql:8.4
+      lifecycle:
+        preStop:
+          exec:
+            command: ["sh", "-c", "mysqladmin -u root --password=${DB_PASSWORD} shutdown"]

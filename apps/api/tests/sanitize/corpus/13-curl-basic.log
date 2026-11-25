@@ -1,0 +1,3 @@
+* Connected to registry.example.com (10.0.0.12) port 443
+> GET /v2/ HTTP/2
+> authorization: Basic ${BASIC_AUTH}

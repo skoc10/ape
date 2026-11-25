@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Pod
+metadata: {name: jdbc, namespace: prod}
+spec:
+  containers:
+    - name: app
+      image: acme/java:17
+      env:
+        - name: JDBC_URL
+          value: "jdbc:postgresql://db:5432/app?user=app&password=${DB_PASSWORD}&ssl=true"

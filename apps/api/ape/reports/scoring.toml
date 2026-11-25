@@ -1,0 +1,11 @@
+# Score = 100 minus the deductions below. The only place these numbers live.
+
+[deduction]        # points per finding, by severity
+critical = 15
+high = 8
+medium = 3
+low = 1
+info = 0
+
+[limits]
+max_per_category = 40   # one category can cost at most this many points

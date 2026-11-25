@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cp.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  # One instance at a time: never two side by side.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "cp.selector" (dict "root" . "component" "api") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cp.labels" . | nindent 8 }}
+        {{- include "cp.selector" (dict "root" . "component" "api") | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- include "cp.podSecurity" . | nindent 8 }}
+      containers:
+        - name: api
+          image: {{ include "cp.image" (dict "root" . "name" "ape-api") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- include "cp.containerSecurity" . | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            {{- include "cp.backendEnv" . | nindent 12 }}
+            {{- if .Values.github.existingSecret }}
+            {{- range list "GITHUB_APP_ID" "GITHUB_APP_SLUG" "GITHUB_APP_CLIENT_ID" "GITHUB_APP_CLIENT_SECRET" "GITHUB_APP_PRIVATE_KEY" }}
+            - name: {{ . }}
+              valueFrom:
+                secretKeyRef: {name: {{ $.Values.github.existingSecret }}, key: {{ . }}}
+            {{- end }}
+            {{- end }}
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  selector:
+    {{- include "cp.selector" (dict "root" . "component" "api") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

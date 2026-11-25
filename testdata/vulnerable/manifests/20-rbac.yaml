@@ -1,0 +1,72 @@
+# RBAC-001 wildcards, RBAC-002 cluster-admin binding, RBAC-003 default ServiceAccount with a
+# mounted token, RBAC-004 list on secrets.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: vuln-everything
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vuln-batch-is-cluster-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: vuln-batch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: secret-reader
+  namespace: vuln-shop
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: storefront-reads-secrets
+  namespace: vuln-shop
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: secret-reader
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: vuln-shop
+---
+# Runs as the namespace's default ServiceAccount with its token mounted -> RBAC-003.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightly-export
+  namespace: vuln-batch
+spec:
+  schedule: "0 3 * * *"
+  suspend: true
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: export
+              image: registry.k8s.io/pause:3.10
+              env:
+                - name: EXPORT_API_TOKEN
+                  value: vulnset-cron-token-6a6a6a
+              securityContext: {allowPrivilegeEscalation: false, runAsNonRoot: true, runAsUser: 10001}
+              resources:
+                requests: {cpu: 10m, memory: 16Mi}
+                limits: {memory: 32Mi}

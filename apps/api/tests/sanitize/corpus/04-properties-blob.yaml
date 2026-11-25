@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: legacy
+  namespace: prod
+  annotations:
+    config/application.properties: |
+      spring.datasource.url=jdbc:postgresql://db:5432/app
+      spring.datasource.password=${DB_PASSWORD}
+      aws.accessKeyId=${AWS_KEY}
+      aws.secretKey=${AWS_SECRET}
+spec: {containers: [{name: app, image: "acme/legacy:7"}]}

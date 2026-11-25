@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Pod
+metadata: {name: signer, namespace: prod}
+spec:
+  containers:
+    - name: signer
+      image: acme/signer:1.2.0
+      env:
+        - {name: SIGNING, value: "${RANDOM_TOKEN}"}

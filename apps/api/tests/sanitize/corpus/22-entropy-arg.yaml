@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Pod
+metadata: {name: seeded-arg, namespace: prod}
+spec:
+  containers:
+    - name: app
+      image: acme/app:1.0.0
+      args: ["--seed", "${RANDOM_TOKEN}", "--mode", "fast"]

@@ -1,0 +1,2 @@
+2026-11-20T08:01:12Z INFO  starting api version=1.4.2
+2026-11-20T08:01:12Z DEBUG config db_host=db.prod.svc db_user=app db_password=${DB_PASSWORD} pool=10

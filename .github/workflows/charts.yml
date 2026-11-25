@@ -1,0 +1,145 @@
+name: charts
+on:
+  push:
+    paths: ["deploy/helm/**", "agent/**", "apps/**/Dockerfile", "db/**", ".github/workflows/charts.yml"]
+  pull_request:
+    paths: ["deploy/helm/**", "agent/**", "apps/**/Dockerfile", "db/**", ".github/workflows/charts.yml"]
+permissions:
+  contents: read
+concurrency:
+  group: charts-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Lint every chart that has a Chart.yaml
+        run: |
+          shopt -s nullglob
+          for chart in deploy/helm/*/; do
+            if [ -f "$chart/Chart.yaml" ]; then
+              helm lint "$chart" -f "$chart/ci/test-values.yaml"
+            else
+              echo "skip $chart (no Chart.yaml yet)"
+            fi
+          done
+      - name: ape-agent refuses unsafe values
+        run: |
+          chart=deploy/helm/ape-agent
+          ! helm template t $chart --set endpoint=wss://cp.example.invalid/v1/agent
+          ! helm template t $chart -f $chart/ci/test-values.yaml --set endpoint=ws://cp.example.invalid/v1/agent
+          ! helm template t $chart -f $chart/ci/test-values.yaml --set endpoint=http://cp.example.invalid
+      - name: ServiceMonitor is rendered only when metrics are enabled
+        run: |
+          chart=deploy/helm/ape-agent
+          ! helm template t $chart -f $chart/ci/test-values.yaml | grep -q "kind: ServiceMonitor"
+          helm template t $chart -f $chart/ci/test-values.yaml --set metrics.enabled=true | grep -q "kind: ServiceMonitor"
+          helm template t $chart -f $chart/ci/test-values.yaml | grep -q '"127.0.0.1:9090"'
+
+  # Installs the agent chart on kind and proves the ServiceAccount is read-only.
+  agent-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: ape-ci
+      - name: Build and load the agent image
+        run: |
+          docker build -t ghcr.io/skoc10/ape-agent:ci agent
+          kind load docker-image ghcr.io/skoc10/ape-agent:ci --name ape-ci
+      - name: helm install
+        run: |
+          helm install ape-agent deploy/helm/ape-agent -n ape-system --create-namespace \
+            -f deploy/helm/ape-agent/ci/test-values.yaml --set image.tag=ci --wait --timeout 120s
+          kubectl -n ape-system get pods
+      - name: Pod is non-root with a read-only root filesystem
+        run: |
+          ctx=$(kubectl -n ape-system get pod -l app.kubernetes.io/name=ape-agent \
+            -o jsonpath='{.items[0].spec.containers[0].securityContext}')
+          echo "$ctx"
+          echo "$ctx" | grep -q '"readOnlyRootFilesystem":true'
+          echo "$ctx" | grep -q '"allowPrivilegeEscalation":false'
+          kubectl -n ape-system get pod -l app.kubernetes.io/name=ape-agent \
+            -o jsonpath='{.items[0].spec.securityContext.runAsNonRoot}' | grep -q true
+      - name: ServiceAccount has no write access and no access to secrets
+        run: deploy/helm/ape-agent/ci/rbac-check.sh ape-system
+      - name: Agent log
+        if: always()
+        run: kubectl -n ape-system logs deploy/ape-agent --tail=20 || true
+
+  # Builds the Control Plane images, installs CloudNativePG and the chart on kind, and
+  # checks that migrations ran and web, api and worker came up.
+  control-plane-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: ape-ci
+      - name: Build and load images
+        run: |
+          docker build --target api -t ghcr.io/skoc10/ape-api:ci apps/api
+          docker build --target worker -t ghcr.io/skoc10/ape-worker:ci apps/api
+          docker build -t ghcr.io/skoc10/ape-web:ci apps/web
+          docker build -f db/docker/Dockerfile -t ghcr.io/skoc10/ape-migrate:ci db
+          for image in api worker web migrate; do kind load docker-image ghcr.io/skoc10/ape-$image:ci --name ape-ci; done
+      - name: Install the CloudNativePG operator
+        run: |
+          helm repo add cnpg https://cloudnative-pg.github.io/charts
+          helm upgrade --install cnpg cnpg/cloudnative-pg -n cnpg-system --create-namespace --wait --timeout 5m
+      - name: helm install ape-control-plane
+        run: |
+          helm upgrade --install ape deploy/helm/ape-control-plane -n ape --create-namespace \
+            -f deploy/helm/ape-control-plane/ci/test-values.yaml --set image.tag=ci \
+            --set postgres.storage.size=1Gi --set s3.storage.size=1Gi --wait --wait-for-jobs --timeout 12m
+          kubectl -n ape get pods
+      - name: Migrations ran with the three roles and forced RLS
+        run: |
+          kubectl -n ape logs job/ape-migrate-1 | tail -20
+          out=$(kubectl -n ape exec ape-pg-1 -c postgres -- psql -U postgres -d ape -Atc \
+            "select rolname || ':' || rolbypassrls || ':' || rolsuper from pg_roles where rolname like 'app_%' order by 1")
+          echo "$out"
+          test "$out" = "$(printf 'app_auth:false:false\napp_backend:false:false\napp_migrator:true:false')"
+          forced=$(kubectl -n ape exec ape-pg-1 -c postgres -- psql -U postgres -d ape -Atc \
+            "select count(*) from pg_class where relforcerowsecurity")
+          test "$forced" = "5"
+      - name: web, api and worker answer
+        run: |
+          kubectl -n ape rollout status deploy/ape-web deploy/ape-api deploy/ape-worker --timeout=180s
+          kubectl -n ape port-forward svc/ape-web 13000:3000 >/dev/null 2>&1 &
+          kubectl -n ape port-forward svc/ape-api 18000:8000 >/dev/null 2>&1 &
+          sleep 5
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:13000/sign-in)" = "200"
+          curl -sf http://127.0.0.1:13000/api/auth/jwks | grep -q '"keys"'
+          test "$(curl -s http://127.0.0.1:18000/readyz)" = '{"status":"ok"}'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18000/v1/me)" = "401"
+          kubectl -n ape logs deploy/ape-worker | grep -q worker_started
+      - name: Workloads are hardened and only the panel and the agent path are exposed
+        run: |
+          for d in web api worker; do
+            ctx=$(kubectl -n ape get deploy ape-$d -o jsonpath='{.spec.template.spec.containers[0].securityContext}')
+            echo "$d $ctx"
+            echo "$ctx" | grep -q '"readOnlyRootFilesystem":true'
+            echo "$ctx" | grep -q '"allowPrivilegeEscalation":false'
+          done
+          paths=$(kubectl -n ape get ingress ape -o jsonpath='{range .spec.rules[*].http.paths[*]}{.path}{" "}{end}')
+          test "$paths" = "/v1/agent / "
+      - name: Diagnostics
+        if: failure()
+        run: |
+          # Short annotations as well, readable without opening the log.
+          pods=$(kubectl -n ape get pods --no-headers 2>&1 | awk '{print $1"="$3"("$2")"}' | tr '\n' ' ')
+          echo "::error title=pods::$pods"
+          echo "::error title=migrate::$(kubectl -n ape logs job/ape-migrate-1 --tail=3 2>&1 | tr '\n' ' ' | cut -c1-300)"
+          echo "::error title=api::$(kubectl -n ape logs deploy/ape-api --tail=2 2>&1 | tr '\n' ' ' | cut -c1-300)"
+          echo "::error title=web::$(kubectl -n ape logs deploy/ape-web --tail=3 2>&1 | tr '\n' ' ' | cut -c1-300)"
+          kubectl -n ape get pods,jobs,clusters.postgresql.cnpg.io -o wide || true
+          kubectl -n ape describe pods | tail -80 || true
+          for d in web api worker; do kubectl -n ape logs deploy/ape-$d --tail=30 || true; done
+          kubectl -n ape logs job/ape-migrate-1 --tail=40 || true

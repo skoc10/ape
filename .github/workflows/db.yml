@@ -1,0 +1,47 @@
+name: db
+on:
+  push:
+    paths: ["db/**", "deploy/compose/**", ".github/workflows/db.yml"]
+  pull_request:
+    paths: ["db/**", "deploy/compose/**", ".github/workflows/db.yml"]
+permissions:
+  contents: read
+concurrency:
+  group: db-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  infra:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start PostgreSQL (pgTAP) and S3 storage
+        run: |
+          cp .env.example .env
+          docker compose -f deploy/compose/docker-compose.yml --env-file .env up -d --build --wait postgres s3
+      - name: Apply migrations from scratch as app_migrator
+        run: |
+          set -a; . ./.env; set +a
+          docker run --rm --network host -v "$PWD/db:/db:ro" ghcr.io/amacneil/dbmate:2 \
+            --url "$MIGRATOR_DATABASE_URL" --migrations-dir /db/migrations --no-dump-schema up
+      - name: Migrations roll back and re-apply cleanly
+        run: |
+          set -a; . ./.env; set +a
+          for cmd in rollback rollback up; do
+            docker run --rm --network host -v "$PWD/db:/db:ro" ghcr.io/amacneil/dbmate:2 \
+              --url "$MIGRATOR_DATABASE_URL" --migrations-dir /db/migrations --no-dump-schema $cmd
+          done
+      - name: Seed loads
+        run: |
+          docker compose -f deploy/compose/docker-compose.yml --env-file .env exec -T \
+            -e PGPASSWORD=migrator-dev-password postgres \
+            psql -v ON_ERROR_STOP=1 -q -h 127.0.0.1 -U app_migrator -d ape -f /db/seed.sql
+      - name: Tenant isolation tests (pgTAP)
+        run: |
+          docker compose -f deploy/compose/docker-compose.yml --env-file .env exec -T postgres \
+            sh -c 'pg_prove -U postgres -d ape /db/tests/*.sql'
+      - name: Buckets exist and anonymous access is denied
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8333/snapshots)
+          test "$code" = "403"
+          code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8333/reports)
+          test "$code" = "403"

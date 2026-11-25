@@ -1,0 +1,5 @@
+Outputs:
+
+access_key = "${AWS_KEY}"
+secret_key = "${AWS_SECRET}"
+bucket = "acme-prod-backups"
