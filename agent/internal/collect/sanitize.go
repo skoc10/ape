@@ -11,6 +11,14 @@ import (
 
 const lastAppliedAnnotation = "kubectl.kubernetes.io/last-applied-configuration"
 
+// Annotations in which deployment tools keep a full copy of the manifest.
+var manifestCopyAnnotations = []string{
+	lastAppliedAnnotation,
+	"kapp.k14s.io/original",
+	"kopf.zalando.org/last-handled-configuration",
+	"objectset.rio.cattle.io/applied",
+}
+
 var sensitiveName = `(?:pass(?:word|wd)?|secret|token|api[-_]?key|credential|private[-_]?key|auth)`
 
 // --db-password=hunter2, -token=abc, PASSWORD=abc
@@ -22,6 +30,12 @@ var sensitiveFlag = regexp.MustCompile(`(?i)^-{1,2}[\w.-]*` + sensitiveName + `[
 // scheme://user:password@host
 var urlCredentials = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://[^/\s:@]+:)([^@\s/]+)(@)`)
 
+// PASSWORD=abc or "api-key: abc" somewhere inside a longer string (shell one-liners).
+var inlineAssignment = regexp.MustCompile(`(?i)([\w.-]*` + sensitiveName + `[\w.-]*\s*[=:]\s*)([^\s'"&|;<>]+)`)
+
+// "Authorization: Bearer abc": the scheme stays, the credential goes.
+var authScheme = regexp.MustCompile(`(?i)\b((?:bearer|basic)\s+)([^\s'"]+)`)
+
 func redacted(value string) string { return fmt.Sprintf("<redacted:len=%d>", len(value)) }
 
 // Sanitize removes secret-bearing fields from one object, in place.
@@ -30,12 +44,13 @@ func Sanitize(obj map[string]any) {
 		// Both can carry a full copy of the manifest, including literal env values.
 		delete(metadata, "managedFields")
 		if annotations, ok := metadata["annotations"].(map[string]any); ok {
-			delete(annotations, lastAppliedAnnotation)
+			sanitizeAnnotations(annotations)
 			if len(annotations) == 0 {
 				delete(metadata, "annotations")
 			}
 		}
 	}
+	sanitizeStatus(obj)
 	for _, spec := range podSpecs(obj) {
 		for _, field := range []string{"containers", "initContainers", "ephemeralContainers"} {
 			containers, _ := spec[field].([]any)
@@ -78,7 +93,83 @@ func nested(m map[string]any, path ...string) map[string]any {
 	return m
 }
 
+// sanitizeAnnotations drops manifest copies and cleans the free-form rest.
+func sanitizeAnnotations(annotations map[string]any) {
+	for _, name := range manifestCopyAnnotations {
+		delete(annotations, name)
+	}
+	for key, v := range annotations {
+		value, ok := v.(string)
+		if !ok {
+			continue
+		}
+		// An embedded JSON document (node arguments, tool state, another manifest
+		// copy) cannot be cleaned reliably and no rule needs it: only its size stays.
+		if trimmed := strings.TrimSpace(value); strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+			annotations[key] = redacted(value)
+			continue
+		}
+		annotations[key] = sanitizeText(value)
+	}
+}
+
+// sanitizeStatus removes container termination messages: they are the tail of
+// the container's log (or its termination file) and can hold anything it printed.
+func sanitizeStatus(obj map[string]any) {
+	status, _ := obj["status"].(map[string]any)
+	if status == nil {
+		return
+	}
+	for _, field := range []string{"containerStatuses", "initContainerStatuses", "ephemeralContainerStatuses"} {
+		statuses, _ := status[field].([]any)
+		for _, s := range statuses {
+			entry, ok := s.(map[string]any)
+			if !ok {
+				continue
+			}
+			for _, state := range []string{"state", "lastState"} {
+				terminated := nested(entry, state, "terminated")
+				if message, ok := terminated["message"].(string); ok {
+					terminated["message"] = redacted(message)
+				}
+			}
+		}
+	}
+}
+
+// sanitizeHandler cleans a probe or lifecycle handler: exec commands are
+// treated like container args, HTTP header values are always dropped.
+func sanitizeHandler(handler map[string]any) {
+	if exec := nested(handler, "exec"); exec != nil {
+		if command, ok := exec["command"].([]any); ok {
+			exec["command"] = sanitizeArgs(command)
+		}
+	}
+	if httpGet := nested(handler, "httpGet"); httpGet != nil {
+		headers, _ := httpGet["httpHeaders"].([]any)
+		for _, h := range headers {
+			header, ok := h.(map[string]any)
+			if !ok {
+				continue
+			}
+			if value, ok := header["value"].(string); ok {
+				header["value"] = redacted(value)
+			}
+		}
+	}
+}
+
 func sanitizeContainer(container map[string]any) {
+	for _, probe := range []string{"livenessProbe", "readinessProbe", "startupProbe"} {
+		if handler := nested(container, probe); handler != nil {
+			sanitizeHandler(handler)
+		}
+	}
+	for _, hook := range []string{"postStart", "preStop"} {
+		if handler := nested(container, "lifecycle", hook); handler != nil {
+			sanitizeHandler(handler)
+		}
+	}
 	if env, ok := container["env"].([]any); ok {
 		for _, e := range env {
 			entry, ok := e.(map[string]any)
@@ -121,13 +212,29 @@ func sanitizeArgs(args []any) []any {
 		}
 		maskNext = false
 		if m := sensitiveAssignment.FindStringSubmatch(arg); m != nil {
-			arg = m[1] + redacted(m[2])
+			out[i] = m[1] + redacted(m[2])
+			continue
 		}
-		arg = urlCredentials.ReplaceAllStringFunc(arg, func(match string) string {
-			m := urlCredentials.FindStringSubmatch(match)
-			return m[1] + redacted(m[2]) + m[3]
-		})
-		out[i] = arg
+		out[i] = sanitizeText(arg)
 	}
 	return out
+}
+
+// sanitizeText masks credentials inside free text: URL passwords, name=value
+// pairs with a sensitive name and Bearer/Basic credentials.
+func sanitizeText(text string) string {
+	text = replaceGroup(urlCredentials, text)
+	text = replaceGroup(authScheme, text)
+	return replaceGroup(inlineAssignment, text)
+}
+
+// replaceGroup redacts the second capture group of every match of re.
+func replaceGroup(re *regexp.Regexp, text string) string {
+	return re.ReplaceAllStringFunc(text, func(match string) string {
+		m := re.FindStringSubmatch(match)
+		if strings.HasPrefix(m[2], "<redacted:") {
+			return match
+		}
+		return m[1] + redacted(m[2]) + strings.Join(m[3:], "")
+	})
 }

@@ -158,3 +158,29 @@ def test_input_is_not_modified(masker: Masker) -> None:
 def test_short_keys_are_rejected() -> None:
     with pytest.raises(ValueError):
         Masker(b"short")
+
+
+def test_structural_names_do_not_exempt_plain_strings(masker: Masker) -> None:
+    """Week 2 review: an annotation called "secret" slipped through the allowlist."""
+    obj = {
+        "metadata": {"annotations": {"secret": "annot-leak-a", "secrets": "annot-leak-b"}},
+        "spec": {
+            "volumes": [{"name": "tls", "secret": {"secretName": "web-tls"}}],
+            "containers": [{"env": [{"name": "SECRET", "value": "env-leak-c"}]}],
+        },
+    }
+    out = json.dumps(masker.mask(obj))
+    for leak in ("annot-leak-a", "annot-leak-b", "env-leak-c"):
+        assert leak not in out
+    assert '"secretName": "web-tls"' in out
+
+
+def test_credential_headers_are_masked(masker: Masker) -> None:
+    headers = [
+        {"name": "Authorization", "value": "Bearer header-leak-a"},
+        {"name": "Cookie", "value": "session=header-leak-b"},
+        {"name": "X-Request-Source", "value": "kubelet"},
+    ]
+    out = json.dumps(masker.mask({"httpGet": {"httpHeaders": headers}}))
+    assert "header-leak" not in out
+    assert "kubelet" in out

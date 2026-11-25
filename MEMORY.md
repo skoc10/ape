@@ -212,6 +212,34 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
 
 ## Haftalık Review Notları
 
+### Hafta 2 Review: Temiz (2026-11-25)
+
+Bağımsız reviewer `e8f8a32` üzerinde hükmü verdi: kritik veya yüksek bulgu yok, Hafta 3 onaylandı.
+Dört orta bulgu review commit'inde testleriyle düzeltildi (ekili sırlar iki kilidi de geçiyordu):
+
+- **O1:** probe ve lifecycle `exec.command` alanları `args` kurallarından geçiyor; `httpHeaders`
+  değerleri her zaman redakte. Masker `Authorization`/`Cookie` başlıklarını maskeliyor.
+- **O2:** pod `status` içindeki `terminated.message` (log kuyruğu) her zaman redakte.
+- **O3:** `kapp`, `kopf`, Rancher manifest kopyası anotasyonları siliniyor; JSON içeren anotasyon
+  değerleri redakte; kalan anotasyon ve argüman metinleri `sanitizeText`'ten geçiyor (URL parolası,
+  dizgi içi `ad=değer`, `Bearer`/`Basic`).
+- **O4:** masker'ın yapısal izin listesi artık düz dizgileri muaf tutmuyor (yalnızca `secretName`,
+  `secretNamespace`).
+
+Backlog (düşük, rapor: `reviews/hafta-2-review.md`):
+
+- **D1:** takılan toplama bellekte kalıp yeni audit'i engelliyor; süre sınırı ve `mark_collected`
+  dönüş değeri denetimi.
+- **D2 (3.2 ile):** açılmış veri için toplam sınır, parça sınırını 16 MiB'e indirme, `max_pods`'u
+  sunucuda denetleme.
+- **D3:** ajanın hata mesajı loga yazılmasın, yalnızca `code`.
+- **D4 (3.2 ile):** `-pPAROLA` ve tireyle başlayan değerler korpusa; `auth` kalıbını daralt
+  (`--authorization-mode` gibi değerler şu an redakte oluyor).
+- **D5:** `controlPlaneCIDRs` Kubernetes API çıkışını da kısıtlıyor; `checksum/token` düz SHA-256;
+  ClusterRole'de kullanılmayan `get` ve `replicasets`.
+- **D6 (4.6):** Actions'ı SHA ile sabitle, taban imajı digest ile sabitle, cosign imzası ve SBOM.
+- **D7:** kimliği doğrulanmış ajan için çerçeve hız sınırı.
+
 ### Hafta 1 Review: Temiz (2026-11-25)
 
 Bağımsız reviewer `6381df9` üzerinde nihai hükmü verdi: kritik veya orta bulgu yok, Hafta 2

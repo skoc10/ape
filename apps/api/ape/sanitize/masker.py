@@ -25,7 +25,10 @@ _SENSITIVE_KEY = re.compile(
 )
 
 # Kubernetes fields that match the pattern above but hold references or settings,
-# not secret values. Rules and patches need them intact.
+# not secret values. Rules and patches need them intact. The exemption covers
+# mappings, lists, numbers and booleans only: a plain string under one of these
+# names (e.g. an annotation called "secret") is masked like any other, unless
+# the key is a name reference listed in _REFERENCE_KEYS.
 _STRUCTURAL_KEYS = frozenset(
     {
         "secretname",
@@ -44,6 +47,11 @@ _STRUCTURAL_KEYS = frozenset(
     }
 )
 
+_REFERENCE_KEYS = frozenset({"secretname", "secretnamespace"})
+
+# {"name": "Authorization", "value": "..."}: HTTP headers that carry credentials.
+_SENSITIVE_NAMES = frozenset({"authorization", "proxy-authorization", "cookie", "set-cookie"})
+
 _PEM = re.compile(r"-----BEGIN ([A-Z0-9 ]+)-----.*?-----END \1-----", re.DOTALL)
 
 _PLACEHOLDER = re.compile(r"^<(?:secret:[a-z_]+:[0-9a-f]{4}|redacted:len=\d+)>$")
@@ -54,8 +62,19 @@ def derive_tenant_key(master_key: bytes, org_id: str) -> bytes:
     return hmac.new(master_key, b"ape-masking:" + org_id.encode(), hashlib.sha256).digest()
 
 
-def _is_sensitive_key(key: str) -> bool:
-    return key.lower() not in _STRUCTURAL_KEYS and _SENSITIVE_KEY.search(key) is not None
+def _is_sensitive_key(key: str, value: Any = None) -> bool:
+    lowered = key.lower()
+    if lowered in _REFERENCE_KEYS:
+        return False
+    if lowered in _STRUCTURAL_KEYS and not isinstance(value, str):
+        return False
+    return _SENSITIVE_KEY.search(key) is not None
+
+
+def _is_sensitive_name(name: Any) -> bool:
+    return isinstance(name, str) and (
+        name.lower() in _SENSITIVE_NAMES or _is_sensitive_key(name, "")
+    )
 
 
 class Masker:
@@ -89,10 +108,9 @@ class Masker:
         out: dict[str, Any] = {}
         # {"name": "DB_PASSWORD", "value": "..."}: the env var / parameter shape, where
         # the sensitive word sits in a sibling field instead of the key.
-        name = node.get("name")
-        named_secret = isinstance(name, str) and _is_sensitive_key(name)
+        named_secret = _is_sensitive_name(node.get("name"))
         for key, value in node.items():
-            sensitive = _is_sensitive_key(key) or (named_secret and key == "value")
+            sensitive = _is_sensitive_key(key, value) or (named_secret and key == "value")
             if sensitive and isinstance(value, dict):
                 # A nested mapping under a sensitive key (e.g. stringData-like maps): every
                 # string below it is a secret value.

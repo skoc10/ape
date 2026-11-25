@@ -152,3 +152,77 @@ func TestSanitizeHandlesObjectsWithoutPodSpecs(t *testing.T) {
 		t.Error("an annotations map emptied by sanitizing should be removed")
 	}
 }
+
+// Places outside env/command/args where secrets were found to survive (week 2 review).
+func TestSanitizeCoversProbesStatusAndAnnotations(t *testing.T) {
+	leaks := []string{
+		"probe-exec-leak", "probe-flag-leak", "probe-header-leak", "lifecycle-url-leak",
+		"shell-assign-leak", "bearer-leak", "termination-leak", "init-termination-leak",
+		"kapp-copy-leak", "json-annotation-leak", "annotation-url-leak",
+	}
+	container := map[string]any{
+		"name": "app",
+		"args": []any{"-c", "export DB_PASSWORD=shell-assign-leak && curl -H 'Authorization: Bearer bearer-leak' http://x"},
+		"livenessProbe": map[string]any{
+			"exec": map[string]any{"command": []any{"redis-cli", "--password", "probe-exec-leak", "--token=probe-flag-leak", "ping"}},
+		},
+		"readinessProbe": map[string]any{
+			"httpGet": map[string]any{
+				"path": "/healthz",
+				"httpHeaders": []any{
+					map[string]any{"name": "Authorization", "value": "Bearer probe-header-leak"},
+				},
+			},
+		},
+		"lifecycle": map[string]any{
+			"preStop": map[string]any{"exec": map[string]any{"command": []any{"curl", "https://ops:lifecycle-url-leak@hooks.internal/stop"}}},
+		},
+	}
+	terminated := func(message string) map[string]any {
+		return map[string]any{"name": "app", "lastState": map[string]any{
+			"terminated": map[string]any{"exitCode": float64(1), "reason": "Error", "message": message},
+		}}
+	}
+	pod := map[string]any{
+		"metadata": map[string]any{
+			"name": "web",
+			"annotations": map[string]any{ //nolint:gosec // planted fake credentials
+				"kapp.k14s.io/original": `{"spec":{"env":"kapp-copy-leak"}}`,
+				"k3s.io/node-args":      `["server","--datastore-endpoint","json-annotation-leak"]`,
+				"example.com/upstream":  "amqp://svc:annotation-url-leak@mq.internal:5672",
+				"team":                  "payments",
+			},
+		},
+		"spec": map[string]any{"containers": []any{container}},
+		"status": map[string]any{
+			"phase":                 "Running",
+			"containerStatuses":     []any{terminated("panic: connect postgres://app:termination-leak@db failed")},
+			"initContainerStatuses": []any{terminated("init-termination-leak")},
+		},
+	}
+	Sanitize(pod)
+
+	encoded, err := json.Marshal(pod)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, leak := range leaks {
+		if strings.Contains(string(encoded), leak) {
+			t.Errorf("%q survived sanitizing: %s", leak, encoded)
+		}
+	}
+	// What the rules need is still there.
+	for _, kept := range []string{`"team":"payments"`, `"path":"/healthz"`, `"name":"Authorization"`, `"reason":"Error"`, `"redis-cli"`, `"ping"`, `mq.internal:5672`, `"phase":"Running"`} {
+		if !strings.Contains(string(encoded), kept) {
+			t.Errorf("%s was lost by sanitizing: %s", kept, encoded)
+		}
+	}
+}
+
+func TestSanitizeTextLeavesPlainTextAlone(t *testing.T) {
+	for _, text := range []string{"payments", "nginx -g daemon off;", "https://example.com/path?x=1", "10.0.0.0/8"} {
+		if got := sanitizeText(text); got != text {
+			t.Errorf("sanitizeText(%q) = %q", text, got)
+		}
+	}
+}
