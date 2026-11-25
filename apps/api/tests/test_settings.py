@@ -8,6 +8,8 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from ape.reports.logo import acceptable, dimensions
+
 from .conftest import Tenant, TokenFactory, bearer
 
 
@@ -25,6 +27,33 @@ def png(width: int = 2, height: int = 2) -> bytes:
         + chunk(b"IDAT", zlib.compress(raw))
         + chunk(b"IEND", b"")
     )
+
+
+def png_header_only(width: int, height: int) -> bytes:
+    """A PNG that declares a size; the limit must apply before anything is decoded."""
+    header = struct.pack(">IIBBBBB", width, height, 1, 0, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + struct.pack(">I", 13)
+        + b"IHDR"
+        + header
+        + struct.pack(">I", zlib.crc32(b"IHDR" + header))
+    )
+
+
+def jpeg_header_only(width: int, height: int) -> bytes:
+    app0 = b"\xff\xe0" + struct.pack(">H", 16) + b"JFIF\x00" + b"\x00" * 9
+    frame = b"\xff\xc2" + struct.pack(">HBHHB", 17, 8, height, width, 3) + b"\x00" * 9
+    return b"\xff\xd8" + app0 + frame
+
+
+def test_logo_size_is_read_from_the_header() -> None:
+    assert dimensions(png(3, 5)) == (3, 5)
+    assert dimensions(jpeg_header_only(640, 480)) == (640, 480)
+    assert acceptable(png(2048, 1)) and not acceptable(png_header_only(2049, 1))
+    assert acceptable(jpeg_header_only(640, 480))
+    assert dimensions(b"\xff\xd8\xff\xda\x00\x02") is None  # image data without a frame
+    assert dimensions(b"GIF89a") is None
 
 
 @pytest.fixture
@@ -128,6 +157,12 @@ def test_logo_upload_download_and_delete(
         (b"<html><script>alert(1)</script></html>", 415),
         (b"", 415),
         (b"\x89PNG\r\n\x1a\n" + b"\x00" * (512 * 1024), 413),
+        (b"\x89PNG\r\n\x1a\n" + b"\x00" * 64, 422),  # no readable header
+        (b"\xff\xd8\xff\xe0" + b"\x00" * 64, 422),
+        (png_header_only(13000, 13000), 422),  # 20 KB on disk, more than 1 GB when decoded
+        (png_header_only(2049, 16), 422),
+        (png_header_only(0, 16), 422),
+        (jpeg_header_only(40000, 40000), 422),
     ],
 )
 def test_bad_logos_are_refused(

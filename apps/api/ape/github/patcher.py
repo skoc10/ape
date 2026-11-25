@@ -153,8 +153,8 @@ def _merge(target: Any, patch: Any) -> Any:
                 k
                 for k in _MERGE_KEYS
                 if patch
-                and all(isinstance(i, dict) and k in i for i in patch)
-                and all(isinstance(i, dict) and k in i for i in target)
+                and all(isinstance(i, dict) and isinstance(i.get(k), str | int) for i in patch)
+                and all(isinstance(i, dict) and isinstance(i.get(k), str | int) for i in target)
             ),
             None,
         )
@@ -268,6 +268,11 @@ def apply_patches(sources: dict[str, str], requests: list[PatchRequest]) -> Patc
             result.manual.append(Manual(request, "the patch is not a YAML mapping"))
             continue
         # A patch may restate identity fields; it must never change them.
+        if "metadata" in patch and not isinstance(patch["metadata"], dict):
+            # ``metadata: null`` would delete the name and namespace, a scalar or a list
+            # would replace them.
+            result.manual.append(Manual(request, "the patch replaces the resource metadata"))
+            continue
         metadata = patch.get("metadata")
         if isinstance(metadata, dict):
             for key in ("name", "namespace"):

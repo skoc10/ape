@@ -22,6 +22,8 @@ from .test_patcher import DEPLOYMENT, PATCH
 
 INSTALLATION = 4242
 REPO = "acme/infra"
+SECRET_REPO = "acme/payroll"  # in the installation, invisible to the connecting user
+READ_ONLY_REPO = "acme/website"  # visible to the connecting user, but not writable
 
 _KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 PRIVATE_PEM = _KEY.private_bytes(
@@ -34,6 +36,11 @@ class FakeGitHub:
 
     def __init__(self) -> None:
         self.user_installations = [INSTALLATION]
+        # What the GitHub user who connects the App can do in each repository it covers.
+        self.user_repos: dict[str, dict[str, bool]] = {
+            REPO: {"admin": False, "push": True, "pull": True},
+            SECRET_REPO: {"admin": False, "push": False, "pull": False},
+        }
         self.files = {
             "k8s/storefront.yaml": DEPLOYMENT,
             "k8s/README.md": "# not yaml",
@@ -60,6 +67,14 @@ class FakeGitHub:
             return httpx.Response(
                 200, json={"installations": [{"id": i} for i in self.user_installations]}
             )
+        if path == f"/user/installations/{INSTALLATION}/repositories":
+            assert auth == "Bearer user-token"
+            visible = [
+                {"full_name": name, "permissions": permissions}
+                for name, permissions in self.user_repos.items()
+                if permissions["pull"]
+            ]
+            return httpx.Response(200, json={"repositories": visible})
         if path == f"/app/installations/{INSTALLATION}/access_tokens":
             self.app_jwts.append(auth.removeprefix("Bearer "))
             return httpx.Response(201, json={"token": "installation-token"})
@@ -67,7 +82,11 @@ class FakeGitHub:
             return httpx.Response(404, json={"message": "Not Found"})
         assert auth == "Bearer installation-token", f"unauthenticated call to {path}"
         if path == "/installation/repositories":
-            repos = [{"full_name": REPO, "default_branch": "main", "private": True}]
+            # The installation token sees every repository, whoever asks.
+            repos = [
+                {"full_name": name, "default_branch": "main", "private": True}
+                for name in (REPO, SECRET_REPO, READ_ONLY_REPO)
+            ]
             return httpx.Response(200, json={"repositories": repos})
         if path == f"/repos/{REPO}":
             return httpx.Response(200, json={"default_branch": "main"})
@@ -289,6 +308,75 @@ def test_an_installation_the_user_does_not_control_is_rejected(
     )
 
 
+def test_a_collaborator_only_gets_the_repositories_they_can_push_to(
+    gh_client: TestClient,
+    auth_a: dict[str, str],
+    github: FakeGitHub,
+    admin_db: psycopg.Connection[Any],
+    tenant_a: Tenant,
+) -> None:
+    """The installation covers three repositories and its token can write all of them. The
+    person who connects it can push to one, read a second and not even see the third:
+    the workspace must not get further than that person would on GitHub."""
+    github.user_repos[READ_ONLY_REPO] = {"admin": False, "push": False, "pull": True}
+    connect(gh_client, auth_a)
+    listed = gh_client.get("/v1/settings/github/repos", headers=auth_a).json()
+    assert [r["full_name"] for r in listed] == [REPO]
+    for repo in (SECRET_REPO, READ_ONLY_REPO):
+        resp = gh_client.put(
+            "/v1/settings/github/repo", json={"repo": repo, "manifest_path": "/"}, headers=auth_a
+        )
+        assert resp.status_code == 404
+    assert gh_client.get("/v1/settings/github", headers=auth_a).json()["repo"] == REPO
+
+    # Even if the stored choice is tampered with, no pull request goes to such a repository.
+    admin_db.execute(
+        "update organization_settings set github_repo = %s where org_id = %s",
+        (SECRET_REPO, tenant_a.org_id),
+    )
+    run_id = audit_with_patch(admin_db, tenant_a)
+    before = len(github.requests)
+    assert gh_client.post(f"/v1/audits/{run_id}/pr", headers=auth_a).status_code == 409
+    assert len(github.requests) == before
+
+
+def test_a_user_who_cannot_push_anywhere_cannot_connect_the_installation(
+    gh_client: TestClient, auth_a: dict[str, str], github: FakeGitHub
+) -> None:
+    github.user_repos = {REPO: {"admin": False, "push": False, "pull": True}}
+    body = {
+        "installation_id": INSTALLATION,
+        "code": "good-code",
+        "state": state_of(gh_client, auth_a),
+    }
+    resp = gh_client.post("/v1/settings/github/installation", json=body, headers=auth_a)
+    assert resp.status_code == 403
+    assert gh_client.get("/v1/settings/github", headers=auth_a).json()["connected"] is False
+
+
+def test_reconnecting_resets_the_repository_choice_and_disconnecting_clears_the_list(
+    gh_client: TestClient,
+    auth_a: dict[str, str],
+    admin_db: psycopg.Connection[Any],
+    tenant_a: Tenant,
+) -> None:
+    connect(gh_client, auth_a)
+    body = {
+        "installation_id": INSTALLATION,
+        "code": "good-code",
+        "state": state_of(gh_client, auth_a),
+    }
+    again = gh_client.post("/v1/settings/github/installation", json=body, headers=auth_a)
+    assert again.status_code == 200 and again.json()["repo"] is None
+    gh_client.delete("/v1/settings/github", headers=auth_a)
+    row = admin_db.execute(
+        "select github_installation_id, github_repo, github_allowed_repos "
+        "from organization_settings where org_id = %s",
+        (tenant_a.org_id,),
+    ).fetchone()
+    assert row == (None, None, None)
+
+
 def test_state_is_bound_to_the_user_and_the_tenant(
     gh_client: TestClient, auth_a: dict[str, str], auth_b: dict[str, str]
 ) -> None:
@@ -483,3 +571,57 @@ def test_pull_request_description_for_the_three_matching_cases() -> None:
         and "hostNetwork: false" in manual
     )
     assert plan.commit_message == "Apply Kubernetes audit fixes (2 findings)"
+
+
+def test_pull_request_text_cannot_break_the_table_or_add_links() -> None:
+    def row(title: str) -> dict[str, Any]:
+        return {
+            "fingerprint": "f",
+            "rule_id": "SEC-002",
+            "title": title,
+            "resource_kind": "Deployment",
+            "resource_ns": "shop",
+            "resource_name": "storefront",
+            "patch": "spec:\n  template:\n    spec:\n      hostNetwork: false\n",
+        }
+
+    plan = plan_pull_request(
+        {"k8s/storefront.yaml": DEPLOYMENT},
+        [
+            row(
+                "trailing backslash \\| extra cell | [click](https://evil.example) ![x](https://evil.example/p.png)"
+            )
+        ],
+        cluster_name="prod",
+        summary="see [the fix](https://evil.example)",
+        score=None,
+        report_url=None,
+    )
+    line = next(text for text in plan.body.splitlines() if "trailing backslash" in text)
+    # Every pipe that came from the title is escaped by an odd number of backslashes.
+    assert "\\\\\\| extra cell \\| " in line
+    assert "](" not in plan.body.replace("\\](", "")  # only escaped brackets are left
+    assert "\\[click\\]" in line and "\\[the fix\\]" in plan.body
+
+
+def test_a_patch_with_a_masking_placeholder_is_never_committed() -> None:
+    row = {
+        "fingerprint": "f",
+        "rule_id": "SEC-009",
+        "title": "Secret in an environment variable",
+        "resource_kind": "Deployment",
+        "resource_ns": "shop",
+        "resource_name": "storefront",
+        "patch": "spec:\n  template:\n    spec:\n      containers:\n        - name: web\n"
+        "          env:\n            - name: TOKEN\n              value: <secret:generic:ab12>\n",
+    }
+    plan = plan_pull_request(
+        {"k8s/storefront.yaml": DEPLOYMENT},
+        [row],
+        cluster_name="prod",
+        summary="",
+        score=None,
+        report_url=None,
+    )
+    assert plan.result.files == {} and plan.result.applied == []
+    assert [m.reason for m in plan.result.manual] == ["the patch contains a masked value"]

@@ -18,6 +18,7 @@ from jinja2 import Environment, PackageLoader, select_autoescape
 from markupsafe import Markup
 
 from ape.reports.charts import category_bars, score_ring
+from ape.reports.logo import acceptable
 from ape.reports.scoring import SEVERITIES
 
 DEFAULT_COLOR = "#1f6feb"
@@ -77,7 +78,9 @@ def render_html(data: ReportData) -> str:
         else DEFAULT_COLOR
     )
     logo_data_uri = None
-    if data.logo is not None and data.logo[1] in _LOGO_TYPES:
+    # The size is checked again here: a logo stored before the upload limit existed, or
+    # written to the bucket by other means, must not reach the PDF renderer either.
+    if data.logo is not None and data.logo[1] in _LOGO_TYPES and acceptable(data.logo[0]):
         logo_data_uri = f"data:{data.logo[1]};base64,{base64.b64encode(data.logo[0]).decode()}"
     severity_counts = Counter(f.severity for f in data.findings)
     category_counts = Counter(f.category for f in data.findings)

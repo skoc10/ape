@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from ape.core.db import Database
 from ape.core.deps import CurrentPrincipal
 from ape.core.tenancy import Principal
+from ape.reports.logo import MAX_LOGO_SIDE, acceptable, detect_type
 from ape.repos import org_settings
 from ape.storage import ObjectStore
 
@@ -19,12 +20,10 @@ log = structlog.get_logger(__name__)
 MANAGER_ROLES = {"owner", "admin"}
 MAX_LOGO_BYTES = 512 * 1024
 
-# Raster formats only. SVG is refused on purpose: it can carry scripts and external
-# references, and the logo ends up inside every customer's report.
-_LOGO_SIGNATURES = {
-    "image/png": b"\x89PNG\r\n\x1a\n",
-    "image/jpeg": b"\xff\xd8\xff",
-}
+# Raster formats only (ape/reports/logo.py decides by magic bytes). SVG is refused on
+# purpose: it can carry scripts and external references, and the logo ends up inside
+# every customer's report.
+_LOGO_TYPES = {"image/png", "image/jpeg"}
 
 
 def _db(request: Request) -> Database:
@@ -122,12 +121,16 @@ async def upload_logo(
         if len(data) > MAX_LOGO_BYTES:
             raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "logo is larger than 512 KiB")
     # The type is decided by the bytes, not by what the client claims.
-    content_type = next(
-        (t for t, magic in _LOGO_SIGNATURES.items() if bytes(data).startswith(magic)), None
-    )
+    content_type = detect_type(bytes(data))
     if content_type is None:
         raise HTTPException(
             status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "logo must be a PNG or JPEG image"
+        )
+    # A tiny file can declare an enormous canvas, which the PDF renderer would decode.
+    if not acceptable(bytes(data)):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"logo must be at most {MAX_LOGO_SIDE} x {MAX_LOGO_SIDE} pixels",
         )
     key = await store.put_logo(principal.org_id, bytes(data), content_type)
     async with db.tenant(principal.org_id) as tc:
@@ -153,7 +156,7 @@ async def get_logo(principal: CurrentPrincipal, store: Store) -> Response:
     if found is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no logo")
     data, content_type = found
-    if content_type not in _LOGO_SIGNATURES:
+    if content_type not in _LOGO_TYPES:
         content_type = "application/octet-stream"
     return Response(
         data,

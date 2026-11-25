@@ -27,7 +27,7 @@ from ape.reports.scoring import ScoringConfig, compute_score, load_config
 from ape.storage import ObjectStore
 
 from .conftest import Tenant, TokenFactory, bearer
-from .test_settings import png
+from .test_settings import png, png_header_only
 from .test_worker import queue_run, run_row, vulnerable_objects
 
 PRODUCT_NAMES = re.compile(
@@ -176,6 +176,12 @@ def test_defaults_without_branding() -> None:
     assert PRODUCT_NAMES.search(html) is None
     assert "<img" not in html
     assert 'src="data:image/svg' not in render_html(report(logo=(b"<svg/>", "image/svg+xml")))
+
+
+def test_an_oversized_logo_never_reaches_the_renderer() -> None:
+    # Already stored before the upload limit existed: left out of the report, not decoded.
+    html = render_html(report(logo=(png_header_only(13000, 13000), "image/png")))
+    assert "<img" not in html
 
 
 # --- PDF -----------------------------------------------------------------------------

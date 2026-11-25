@@ -14,8 +14,8 @@ acceptable when all of them are green and the manual item at the end is confirme
 | 7 | No secret reaches the LLM: the model call accepts only a `MaskedPayload`, and the payload is masked once more on the way out | `apps/api/tests/test_analyst.py` (`test_nothing_unmasked_reaches_the_model`), `test_security_checklist.py` | `api` |
 | 8 | Logs carry identifiers, kinds, counts and durations, never Kubernetes object content, tokens or request input | `apps/api/tests/test_security_checklist.py`, `test_clusters.py` (`test_token_never_appears_in_logs`), `agent/internal/collect/collector_test.go` (`TestAgentLogsNeverContainObjectContent`) | `api`, `agent` |
 | 9 | The LLM cannot add findings, lower a severity, or propose a patch for another resource | `apps/api/tests/test_analyst.py` | `api` |
-| 10 | Reports are inert documents (no scripts, no external resources) and carry no product name | `apps/api/tests/test_reports.py` | `api` |
-| 11 | A GitHub installation can only be attached by a GitHub user who controls it; pull requests are opened only on request | `apps/api/tests/test_github.py` | `api` |
+| 10 | Reports are inert documents (no scripts, no external resources) and carry no product name; the logo is a PNG or JPEG of at most 2048 x 2048 pixels | `apps/api/tests/test_reports.py`, `test_settings.py` | `api` |
+| 11 | A GitHub installation can only be attached by a GitHub user who can see it, and the workspace is limited to the repositories that user can push to; pull requests are opened only on request and never carry a masking placeholder | `apps/api/tests/test_github.py` | `api` |
 | 12 | The whole chain on a real cluster: planted secrets are in neither the snapshot, the findings nor the report | `apps/web/scripts/e2e-collect.mjs` | `e2e` |
 
 ## Manual item: Zero Data Retention for the external LLM

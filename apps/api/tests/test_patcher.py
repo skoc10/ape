@@ -1,5 +1,7 @@
 """Manifest patching with ruamel.yaml (task 4.4): comments survive, matching rules hold."""
 
+import pytest
+
 from ape.github.patcher import PatchRequest, Target, apply_patches
 
 DEPLOYMENT = """\
@@ -207,3 +209,17 @@ def test_untouched_files_are_not_rewritten() -> None:
         {"k8s/storefront.yaml": DEPLOYMENT, "k8s/service.yaml": other}, [request()]
     )
     assert list(result.files) == ["k8s/storefront.yaml"]
+
+
+@pytest.mark.parametrize("metadata", ["null", "gone", "[a, b]", "~"])
+def test_a_patch_cannot_delete_or_replace_the_metadata(metadata: str) -> None:
+    hostile = f"metadata: {metadata}\nspec:\n  replicas: 0\n"
+    result = apply_patches({"k8s/storefront.yaml": DEPLOYMENT}, [request(patch=hostile)])
+    assert result.files == {} and result.applied == []
+    assert [m.reason for m in result.manual] == ["the patch replaces the resource metadata"]
+
+
+def test_list_items_with_unusable_merge_keys_replace_the_list_instead_of_crashing() -> None:
+    odd = "spec:\n  template:\n    spec:\n      containers:\n        - name: [not, a, name]\n          image: x\n"
+    result = apply_patches({"k8s/storefront.yaml": DEPLOYMENT}, [request(patch=odd)])
+    assert len(result.applied) == 1 and "k8s/storefront.yaml" in result.files

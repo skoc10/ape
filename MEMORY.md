@@ -377,7 +377,9 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
   (read/write), Metadata (read); "Request user authorization (OAuth) during installation" açık;
   Callback URL ve Setup URL `https://<panel-adresi>/github/callback`. Ardından `GITHUB_APP_ID`,
   `GITHUB_APP_SLUG`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`
-  ve `PUBLIC_WEB_URL` ortam değişkenleri. Sonra gerçek bir test reposunda bir PR denenmeli.
+  ve `PUBLIC_WEB_URL` ortam değişkenleri. Sonra gerçek bir test reposunda bir PR denenmeli;
+  özellikle bağlantı adımındaki `/user/installations/{id}/repositories` yanıtının `permissions.push`
+  alanı gerçek GitHub'da doğrulanmalı (Hafta 4 review O1 yalnızca sahte GitHub'a karşı testli).
 
 - **Claude API anahtarı ve ZDR onayı (3.5).** LLM zenginleştirmesini açmak için worker'a
   `LLM_PROVIDER=anthropic` ve `LLM_API_KEY` verilmeli; müşteri verisi gideceği için hesapta Zero
@@ -404,6 +406,45 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
   `https://skoc10@github.com/skoc10/ape.git` ve push çalışıyor.
 
 ## Haftalık Review Notları
+
+### Hafta 4 Review: Temiz (2026-11-25)
+
+Bağımsız reviewer `3907dc6` üzerinde hükmü verdi: kritik veya yüksek bulgu yok. Üç orta bulgu
+review commit'inde testleriyle düzeltildi (rapor: `reviews/hafta-4-review.md`):
+
+- **O1 (GitHub kurulum kapsamı):** `/user/installations` bir kurulumu, kapsadığı tek bir repoda
+  ortak çalışan herkese listeler; kurulum token'ı ise bütün repolara yazabilir. Eski kontrolle
+  bir repoda okuma yetkisi olan kişi kurulumu kendi workspace'ine bağlayıp bütün (özel) repo
+  adlarını görebilir ve yazamadığı repolarda dal ile PR açtırabilirdi. Artık bağlanırken
+  `/user/installations/{id}/repositories` ile kişinin **push** yetkisi olan repolar alınıp
+  `organization_settings.github_allowed_repos` sütununa yazılıyor (yeni migration
+  `20261125000003`); repo listesi, repo seçimi ve PR açma bu listeyle sınırlı. Push yetkisi
+  olmayan kişi bağlayamaz. Liste bağlantı anının görüntüsüdür; yetki değişirse yeniden bağlanmalı.
+- **O2 (logo boyutu):** 20 KB'lık 13000 x 13000 bir PNG, worker'da PDF üretirken 1,36 GB bellek
+  harcatıyordu (ölçüldü); paylaşılan worker'ı her audit'te düşürebilirdi. Logo artık başlıktan
+  okunan boyuta göre en fazla 2048 x 2048 (`ape/reports/logo.py`); kontrol hem yüklemede (422)
+  hem rapor üretiminde yapılıyor.
+- **O3 (patcher):** `metadata: null` ya da eşleme olmayan `metadata` kaynağın adını ve
+  namespace'ini silebiliyor/ezebiliyordu; artık "manual" listesine gidiyor. Birleştirme anahtarı
+  liste/eşleme olan liste öğesi 500 hatası veriyordu. Yer tutucu (`<secret:..>`) içeren yama PR
+  planlanırken de reddediliyor (Hafta 3 D14 kapandı). PR metninde ters eğik çizgi ve köşeli
+  parantez kaçışı eklendi (tablo bozma ve bağlantı ekleme).
+
+Backlog (düşük):
+
+- **D15:** PR açıklamasındaki rapor bağlantısı `PUBLIC_WEB_URL/audits/<id>`; gerçek yol
+  `/<orgSlug>/audits/<id>`, yani bağlantı 404 verir. Ayrıca müşterinin reposuna panel alan adını
+  yazar (beyaz etiket). Öneri: bağlantıyı kaldır ya da kiracıya özel bir adres ayarı ekle.
+- **D16:** eşzamanlı iki `POST /audits/{id}/pr` iki PR açabilir (`set_pr_url` sonucu yok
+  sayılıyor); PR açıldıktan sonra DB yazımı başarısız olursa PR sahipsiz kalır.
+- **D17:** `read_manifests` dosyaları istek içinde sırayla okuyor (en çok 300 çağrı) ve ağacın
+  `truncated` alanına bakmıyor; büyük repolarda istek zaman aşımına uğrayabilir.
+- **D18:** `state` tek kullanımlık değil (15 dakika, aynı kullanıcı ve tenant ile sınırlı).
+- **D19:** `github_allowed_repos` yenilenmiyor; "Disconnect" App'i GitHub'dan kaldırmıyor.
+- **D20:** `weasyprint>=62` alt sınırı test edilen 70.0'a çekilmeli.
+- **D21:** `test_security_checklist.py` son satırdaki `[:0]` dilimi iddiayı boşa çıkarıyor.
+- **D22:** 422 yanıtındaki `msg`, UUID hatalarında girdiden tek karakter taşıyabiliyor.
+- Hafta 3'ten açık kalanlar: D8, D9, D10, D11, D12, D13.
 
 ### Hafta 3 Review: Temiz (2026-11-25)
 

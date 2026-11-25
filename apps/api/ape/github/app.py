@@ -83,12 +83,18 @@ class GitHubApp:
         base = self._settings.github_web_url.rstrip("/")
         return f"{base}/apps/{self._settings.github_app_slug}/installations/new?state={state}"
 
-    async def user_can_access_installation(self, code: str, installation_id: int) -> bool:
-        """Proves that the person who came back from GitHub really controls the installation.
+    async def user_writable_repos(self, code: str, installation_id: int) -> list[str] | None:
+        """The repositories of the installation that the person who came back from GitHub
+        can push to, or None when that person cannot see the installation at all.
 
         The installation id in the callback URL is attacker-controllable: without this
         check anyone could attach somebody else's installation to their own workspace
         and get pull requests opened in (and manifests read from) a stranger's repository.
+
+        Seeing an installation is not enough either. GitHub lists it for every collaborator
+        of a single repository it covers, while the App's installation token can write to
+        all of them. So the answer is the list of repositories this person could have
+        pushed to themselves; the workspace is limited to it.
         """
         self._require()
         response = await self._http.post(
@@ -102,17 +108,39 @@ class GitHubApp:
         )
         token = response.json().get("access_token") if response.status_code == 200 else None
         if not isinstance(token, str) or not token:
-            return False
-        page = 1
-        while page <= 10:
+            return None
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": _ACCEPT,
+            "X-GitHub-Api-Version": _API_VERSION,
+        }
+        if not await self._user_sees_installation(headers, installation_id):
+            return None
+        writable: list[str] = []
+        for page in range(1, 11):
+            listing = await self._http.get(
+                f"{self._settings.github_api_url}/user/installations/{installation_id}/repositories",
+                params={"per_page": 100, "page": page},
+                headers=headers,
+            )
+            if listing.status_code != 200:
+                return None
+            batch = listing.json().get("repositories") or []
+            for repo in batch:
+                permissions = repo.get("permissions") or {}
+                name = repo.get("full_name")
+                if isinstance(name, str) and (permissions.get("push") or permissions.get("admin")):
+                    writable.append(name)
+            if len(batch) < 100:
+                break
+        return sorted(writable)
+
+    async def _user_sees_installation(self, headers: dict[str, str], installation_id: int) -> bool:
+        for page in range(1, 11):
             listing = await self._http.get(
                 f"{self._settings.github_api_url}/user/installations",
                 params={"per_page": 100, "page": page},
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Accept": _ACCEPT,
-                    "X-GitHub-Api-Version": _API_VERSION,
-                },
+                headers=headers,
             )
             if listing.status_code != 200:
                 return False
@@ -121,7 +149,6 @@ class GitHubApp:
                 return True
             if len(installations) < 100:
                 return False
-            page += 1
         return False
 
     # --- installation access ---------------------------------------------------------------

@@ -103,18 +103,19 @@ async def connect_installation(
     if not github.check_state(body.state, org_id=principal.org_id, user_id=principal.user_id):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "the GitHub sign-in expired; start again")
     try:
-        allowed = await github.user_can_access_installation(body.code, body.installation_id)
+        writable = await github.user_writable_repos(body.code, body.installation_id)
     except GitHubError as exc:
         raise _upstream(exc) from None
-    if not allowed:
-        # Do not attach an installation the signed-in GitHub user does not control.
+    if not writable:
+        # Do not attach an installation the signed-in GitHub user does not control, or one
+        # in which that user cannot push to any repository.
         log.warning("github_installation_rejected")
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "this GitHub installation does not belong to you"
         )
     async with db.tenant(principal.org_id) as tc:
-        row = await org_settings.set_github(
-            tc, installation_id=body.installation_id, repo=None, manifest_path="/"
+        row = await org_settings.set_github_installation(
+            tc, installation_id=body.installation_id, allowed_repos=writable
         )
     log.info("github_connected")
     return _status(github, row, principal)
@@ -124,7 +125,9 @@ async def connect_installation(
 async def disconnect(principal: CurrentPrincipal, db: Db, github: GitHub) -> GitHubStatus:
     _require_manager(principal)
     async with db.tenant(principal.org_id) as tc:
-        row = await org_settings.set_github(tc, installation_id=None, repo=None, manifest_path="/")
+        row = await org_settings.set_github_installation(
+            tc, installation_id=None, allowed_repos=None
+        )
     return _status(github, row, principal)
 
 
@@ -132,6 +135,15 @@ class RepoOut(BaseModel):
     full_name: str
     default_branch: str
     private: bool
+
+
+def _allowed(row: dict[str, Any]) -> set[str]:
+    """Repositories the person who connected the installation could push to themselves.
+
+    The installation token can write to every repository of the installation; the
+    workspace may only use these.
+    """
+    return set(row["github_allowed_repos"] or [])
 
 
 async def _installation(db: Database, principal: Principal) -> dict[str, Any]:
@@ -150,9 +162,11 @@ async def list_repos(principal: CurrentPrincipal, db: Db, github: GitHub) -> lis
         repos = await github.list_repos(int(row["github_installation_id"]))
     except GitHubError as exc:
         raise _upstream(exc) from None
+    allowed = _allowed(row)
     return [
         RepoOut(full_name=r.full_name, default_branch=r.default_branch, private=r.private)
         for r in repos
+        if r.full_name in allowed
     ]
 
 
@@ -184,15 +198,14 @@ async def choose_repo(
         repos = await github.list_repos(installation_id)
     except GitHubError as exc:
         raise _upstream(exc) from None
-    # Only repositories the installation actually covers can be chosen.
-    if body.repo not in {r.full_name for r in repos}:
+    # Only repositories the installation actually covers, and that the person who connected
+    # it can push to, can be chosen.
+    if body.repo not in {r.full_name for r in repos} & _allowed(row):
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, "the GitHub App is not installed on this repository"
         )
     async with db.tenant(principal.org_id) as tc:
-        row = await org_settings.set_github(
-            tc, installation_id=installation_id, repo=body.repo, manifest_path=manifest_path
-        )
+        row = await org_settings.set_github_repo(tc, repo=body.repo, manifest_path=manifest_path)
     return _status(github, row, principal)
 
 
@@ -222,7 +235,11 @@ async def open_pull_request(
         raise HTTPException(
             status.HTTP_409_CONFLICT, "a pull request was already opened for this audit"
         )
-    if config["github_installation_id"] is None or not config["github_repo"]:
+    if (
+        config["github_installation_id"] is None
+        or not config["github_repo"]
+        or config["github_repo"] not in _allowed(config)
+    ):
         raise HTTPException(
             status.HTTP_409_CONFLICT, "connect GitHub and choose a repository first"
         )

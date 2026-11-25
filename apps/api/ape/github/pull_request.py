@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ape.github.patcher import Applied, Manual, PatchRequest, PatchResult, Target, apply_patches
+from ape.sanitize import contains_placeholder
 
 _RULE_LABEL = {
     "exact": "exact match (kind, namespace, name)",
@@ -37,10 +38,13 @@ def requests_from_findings(rows: list[dict[str, Any]]) -> list[PatchRequest]:
 
 
 def _cell(text: str) -> str:
-    """Text inside a Markdown table cell or line: no table breaks, no HTML, no mentions."""
+    """Text inside a Markdown table cell or line: no table breaks, HTML, links or mentions."""
     cleaned = " ".join(str(text).split())
     for char, replacement in (
+        ("\\", "\\\\"),  # first, so that a trailing backslash cannot unescape what follows
         ("|", "\\|"),
+        ("[", "\\["),  # no links or images of the text's own making
+        ("]", "\\]"),
         ("<", "&lt;"),
         (">", "&gt;"),
         ("@", "@\u200b"),
@@ -98,7 +102,12 @@ def plan_pull_request(
     now: datetime | None = None,
 ) -> PullRequestPlan:
     now = now or datetime.now(UTC)
-    result = apply_patches(sources, requests_from_findings(rows))
+    # Checked again here, not only when the finding was written: a "<secret:...>" placeholder
+    # merged into the repository would overwrite the customer's real value.
+    requests = requests_from_findings(rows)
+    masked = [r for r in requests if contains_placeholder(r.patch)]
+    result = apply_patches(sources, [r for r in requests if not contains_placeholder(r.patch)])
+    result.manual += [Manual(r, "the patch contains a masked value") for r in masked]
     date = now.strftime("%Y-%m-%d")
     title = f"Kubernetes audit fixes for {_cell(cluster_name)} ({date})"
     body = [
