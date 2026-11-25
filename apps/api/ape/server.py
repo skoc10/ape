@@ -15,7 +15,8 @@ from ape.gateway.sessions import SessionRegistry
 from ape.observability.logging import configure_logging
 from ape.observability.metrics import Metrics, install_metrics
 from ape.observability.tracing import build_tracer_provider, instrument_app
-from ape.routers import clusters, health, me
+from ape.routers import audits, clusters, health, me
+from ape.storage import ObjectStore
 
 
 def create_app(
@@ -51,11 +52,13 @@ def create_app(
     app.state.metrics = metrics
     app.state.settings = settings
     app.state.agent_sessions = SessionRegistry()
+    app.state.object_store = ObjectStore(settings)
     install_metrics(app, metrics)
 
     app.include_router(health.router)
     app.include_router(me.router)
     app.include_router(clusters.router)
+    app.include_router(audits.router)
     app.include_router(agent_endpoint.router)
 
     tracer_provider = build_tracer_provider(

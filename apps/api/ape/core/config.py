@@ -28,6 +28,17 @@ class Settings(BaseSettings):
     agent_max_pods: int = 5000
     agent_max_compressed_bytes: int = 50 * 1024 * 1024
 
+    # S3-compatible object storage (SeaweedFS locally). Only the S3 API is used.
+    s3_endpoint_url: str = ""
+    s3_region: str = "us-east-1"
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_bucket_snapshots: str = "snapshots"
+    s3_bucket_reports: str = "reports"
+
+    # Master key for masking placeholders; a per-tenant key is derived from it.
+    masking_key: str = ""
+
     # Tracing is off unless an OTLP endpoint is configured.
     otel_exporter_otlp_endpoint: str = ""
 

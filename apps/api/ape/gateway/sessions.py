@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from starlette.websockets import WebSocketState
 
 from ape.gateway import protocol
+from ape.gateway.collection import Collection
 from ape.observability.metrics import Metrics
 
 # Application close codes (4000-4999 are reserved for applications).
@@ -32,6 +33,8 @@ class AgentSession:
     token_digest: bytes
     websocket: WebSocket
     metrics: Metrics
+    # The collection currently streaming in on this session, if any.
+    collection: Collection | None = None
     _send_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     async def send(self, payload: BaseModel) -> None:

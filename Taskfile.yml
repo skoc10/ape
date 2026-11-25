@@ -123,6 +123,15 @@ tasks:
     dir: apps/web
     cmds: [node scripts/auth-smoke.mjs]
 
+  test:e2e:
+    desc: End-to-end collection on kind (needs `task dev` with the api on 0.0.0.0, `task kind-up` and `task images`; set AGENT_ENDPOINT)
+    dir: apps/web
+    requires:
+      vars: [AGENT_ENDPOINT]
+    cmds:
+      - kind load docker-image ghcr.io/skoc10/ape-agent:dev --name {{.KIND_CLUSTER}}
+      - AGENT_ENDPOINT={{.AGENT_ENDPOINT}} node scripts/e2e-collect.mjs
+
   test:api:
     desc: API tests (need `task infra:up` and `task db:migrate`)
     dir: apps/api

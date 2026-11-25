@@ -23,6 +23,16 @@ export type AgentToken = {
   created_at: string;
 };
 
+export type AuditRun = {
+  id: string;
+  cluster_id: string;
+  status: "queued" | "collecting" | "collected" | "analyzing" | "reporting" | "completed" | "failed";
+  stats: { objects?: number; truncated?: boolean; redactions?: Record<string, number> };
+  error: string | null;
+  has_snapshot: boolean;
+  created_at: string;
+};
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Ids are interpolated into API paths, so anything that is not a UUID is rejected first. */
@@ -47,6 +57,13 @@ export async function getCluster(orgId: string, clusterId: string): Promise<Clus
 export async function listTokens(orgId: string, clusterId: string): Promise<AgentToken[]> {
   if (!isUuid(clusterId)) return [];
   const res = await apiFetch(orgId, `/v1/clusters/${clusterId}/tokens`);
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  return res.json();
+}
+
+export async function listAudits(orgId: string, clusterId: string): Promise<AuditRun[]> {
+  if (!isUuid(clusterId)) return [];
+  const res = await apiFetch(orgId, `/v1/clusters/${clusterId}/audits`);
   if (!res.ok) throw new Error(`API error ${res.status}`);
   return res.json();
 }

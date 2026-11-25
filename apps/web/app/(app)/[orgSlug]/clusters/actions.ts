@@ -64,3 +64,12 @@ export async function revokeToken(orgSlug: string, clusterId: string, tokenId: s
   revalidatePath(`/${orgSlug}/clusters/${clusterId}`);
   return { ok: true };
 }
+
+export async function startAudit(orgSlug: string, clusterId: string): Promise<SimpleResult> {
+  const { organization } = await requireOrganization(orgSlug);
+  if (!isUuid(clusterId)) return { ok: false, error: "cluster not found" };
+  const res = await apiFetch(organization.id, `/v1/clusters/${clusterId}/audits`, { method: "POST" });
+  if (!res.ok) return { ok: false, error: await errorMessage(res) };
+  revalidatePath(`/${orgSlug}/clusters/${clusterId}`);
+  return { ok: true };
+}

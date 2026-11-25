@@ -33,6 +33,12 @@ class Metrics:
             "Open agent WebSocket sessions.",
             registry=self.registry,
         )
+        self.masking_redactions = Counter(
+            "ape_masking_redactions_total",
+            "Values replaced by a placeholder, by detector.",
+            ["detector"],
+            registry=self.registry,
+        )
         self.agent_messages = Counter(
             "ape_agent_messages_total",
             "Agent protocol messages by type and direction (in: from agent, out: to agent).",

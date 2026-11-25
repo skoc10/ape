@@ -1,0 +1,33 @@
+# A small workload with planted fake secrets, used by the end-to-end collection test.
+# None of these values may appear in the stored snapshot.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: e2e-sample
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: leaky
+  namespace: e2e-sample
+  annotations:
+    example.com/api-token: e2e-annotation-token-9f8e7d
+    example.com/ca: |
+      -----BEGIN CERTIFICATE-----
+      MIIBe2eFAKEe2eFAKEe2eFAKEe2eFAKE
+      -----END CERTIFICATE-----
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: leaky}
+  template:
+    metadata:
+      labels: {app: leaky}
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10
+          args: ["--db-password=e2e-arg-password-1a2b3c"]
+          env:
+            - name: DB_PASSWORD
+              value: e2e-env-password-4d5e6f

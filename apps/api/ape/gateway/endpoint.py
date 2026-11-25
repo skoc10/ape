@@ -15,8 +15,13 @@ from ape.core.config import Settings
 from ape.core.db import Database
 from ape.core.tokens import TOKEN_PREFIX, hash_agent_token
 from ape.gateway import protocol
+from ape.gateway.collection import Collection, CollectionError
 from ape.gateway.protocol_gen import (
+    CollectChunkPayload,
+    CollectDonePayload,
     CollectLimits,
+    CollectRequestPayload,
+    ErrorPayload,
     HelloAckPayload,
     HelloPayload,
     MessageType,
@@ -31,7 +36,9 @@ from ape.gateway.sessions import (
     SessionRegistry,
 )
 from ape.observability.metrics import Metrics
-from ape.repos import agent_tokens, clusters
+from ape.repos import agent_tokens, audit_runs, clusters
+from ape.sanitize import Masker, derive_tenant_key
+from ape.storage import ObjectStore
 
 router = APIRouter()
 log = structlog.get_logger(__name__)
@@ -148,8 +155,10 @@ async def agent_gateway(websocket: WebSocket) -> None:
                 await session.send(PongPayload())
             elif isinstance(payload, PongPayload):
                 continue
+            elif isinstance(payload, CollectChunkPayload | CollectDonePayload | ErrorPayload):
+                await _on_collection_message(websocket.app.state.object_store, db, session, payload)
             else:
-                # Collection messages are handled from task 2.6 on. Only the type is logged.
+                # Only the type is logged, never the content.
                 bound.warning("agent_message_ignored", type=message_type.value)
     except WebSocketDisconnect:
         bound.info("agent_disconnected")
@@ -163,6 +172,8 @@ async def agent_gateway(websocket: WebSocket) -> None:
         # The socket was closed from elsewhere (revoked or replaced) while we were using it.
         bound.info("agent_session_closed")
     finally:
+        if session.collection is not None:
+            await asyncio.shield(_fail_run(db, session, "agent disconnected during the collection"))
         if registered:
             metrics.agent_sessions.dec()
             if registry.remove(session):
@@ -172,3 +183,93 @@ async def agent_gateway(websocket: WebSocket) -> None:
                 _cleanups.add(cleanup)
                 cleanup.add_done_callback(_cleanups.discard)
                 await asyncio.shield(cleanup)
+
+
+# --- collections -------------------------------------------------------------------
+
+
+class AuditNotStartable(Exception):
+    """The collection cannot start right now; the message is safe to show to the user."""
+
+
+async def start_collection(settings: Settings, session: AgentSession, run_id: UUID) -> None:
+    """Asks the agent to collect and prepares to receive the chunks."""
+    if session.collection is not None:
+        raise AuditNotStartable("a collection is already running for this cluster")
+    if len(settings.masking_key) < 16:
+        raise AuditNotStartable("masking is not configured (MASKING_KEY)")
+    masker = Masker(derive_tenant_key(settings.masking_key.encode(), session.org_id))
+    session.collection = Collection(
+        run_id, masker, max_compressed_bytes=settings.agent_max_compressed_bytes
+    )
+    try:
+        await session.send(
+            CollectRequestPayload(run_id=run_id, resources=[], exclude_namespaces=[])
+        )
+    except Exception as exc:
+        session.collection.discard()
+        session.collection = None
+        raise AuditNotStartable("the agent connection was lost") from exc
+
+
+async def _fail_run(db: Database, session: AgentSession, reason: str) -> None:
+    collection, session.collection = session.collection, None
+    if collection is None:
+        return
+    collection.discard()
+    async with db.tenant(session.org_id) as tc:
+        await audit_runs.mark_failed(tc, collection.run_id, error=reason)
+    log.warning(
+        "collection_failed",
+        run_id=str(collection.run_id),
+        cluster_id=str(session.cluster_id),
+        reason=reason,
+    )
+
+
+async def _on_collection_message(
+    store: ObjectStore,
+    db: Database,
+    session: AgentSession,
+    payload: CollectChunkPayload | CollectDonePayload | ErrorPayload,
+) -> None:
+    collection = session.collection
+    if collection is None or (payload.run_id is not None and payload.run_id != collection.run_id):
+        # Nothing was requested (or not this run): ignore, an agent cannot start a run by itself.
+        log.warning("unsolicited_collection_message", cluster_id=str(session.cluster_id))
+        return
+    if isinstance(payload, ErrorPayload):
+        await _fail_run(db, session, f"agent reported {payload.code.value}: {payload.message}")
+        return
+    try:
+        if isinstance(payload, CollectChunkPayload):
+            # Decode, mask and spool off the event loop so heartbeats keep flowing.
+            await asyncio.to_thread(collection.add_chunk, payload)
+            return
+        stats = await asyncio.to_thread(collection.finish, payload)
+    except CollectionError as exc:
+        await _fail_run(db, session, f"invalid collection data: {exc}")
+        return
+
+    try:
+        key = await store.put_snapshot(session.org_id, collection.run_id, collection.path)
+    except Exception as exc:
+        log.error(
+            "snapshot_upload_failed", run_id=str(collection.run_id), error_type=type(exc).__name__
+        )
+        await _fail_run(db, session, "could not store the snapshot")
+        return
+    session.collection = None
+    collection.discard()
+    async with db.tenant(session.org_id) as tc:
+        await audit_runs.mark_collected(tc, collection.run_id, snapshot_key=key, stats=stats)
+    for detector, count in stats["redactions"].items():
+        session.metrics.masking_redactions.labels(detector).inc(count)
+    log.info(
+        "collection_stored",
+        run_id=str(collection.run_id),
+        cluster_id=str(session.cluster_id),
+        objects=stats["objects"],
+        chunks=stats["chunks"],
+        truncated=stats["truncated"],
+    )

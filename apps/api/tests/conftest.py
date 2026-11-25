@@ -95,6 +95,10 @@ def settings() -> Settings:
         better_auth_url=ISSUER,
         auth_audience=AUDIENCE,
         membership_cache_ttl_seconds=60,
+        s3_endpoint_url=os.environ.get("S3_ENDPOINT_URL", "http://localhost:8333"),
+        s3_access_key=os.environ.get("S3_ACCESS_KEY", "ape-dev-access-key"),
+        s3_secret_key=os.environ.get("S3_SECRET_KEY", "ape-dev-secret-key"),
+        masking_key="test-masking-key-0123456789abcdef",
     )
 
 

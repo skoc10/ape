@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { AuditPanel } from "@/components/audit-panel";
 import { ClusterStatus } from "@/components/cluster-status";
 import { TokenPanel } from "@/components/token-panel";
-import { getCluster, listClusters, listTokens } from "@/lib/clusters";
+import { getCluster, listAudits, listClusters, listTokens } from "@/lib/clusters";
 import { requireOrganization } from "@/lib/session";
 
 export default async function Page({ params }: PageProps<"/[orgSlug]/clusters/[clusterId]">) {
@@ -11,9 +12,11 @@ export default async function Page({ params }: PageProps<"/[orgSlug]/clusters/[c
   const { organization } = await requireOrganization(orgSlug);
   const cluster = await getCluster(organization.id, clusterId);
   if (!cluster) notFound();
-  const [tokens, { can_manage: canManage }] = await Promise.all([
+  // Sequential on purpose: each call may re-pin the session's active organization.
+  const { can_manage: canManage } = await listClusters(organization.id);
+  const [tokens, audits] = await Promise.all([
     listTokens(organization.id, cluster.id),
-    listClusters(organization.id),
+    listAudits(organization.id, cluster.id),
   ]);
 
   return (
@@ -30,6 +33,23 @@ export default async function Page({ params }: PageProps<"/[orgSlug]/clusters/[c
           Kubernetes {cluster.k8s_version ?? "unknown"} &middot; agent {cluster.agent_version ?? "not connected yet"}
         </p>
       </section>
+      <AuditPanel
+        orgSlug={orgSlug}
+        clusterId={cluster.id}
+        connected={cluster.status === "connected"}
+        canManage={canManage}
+        runs={audits.map((run) => ({
+          id: run.id,
+          status: run.status,
+          objects: run.stats.objects ?? null,
+          redactions: run.stats.redactions
+            ? Object.values(run.stats.redactions).reduce((sum, n) => sum + n, 0)
+            : null,
+          truncated: run.stats.truncated ?? false,
+          error: run.error,
+          created_at: run.created_at,
+        }))}
+      />
       <TokenPanel
         orgSlug={orgSlug}
         clusterId={cluster.id}

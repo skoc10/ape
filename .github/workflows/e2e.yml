@@ -1,0 +1,79 @@
+# Week 2 demo as a test: panel -> cluster + token -> agent on kind (helm) -> audit ->
+# masked snapshot in S3 under the tenant prefix.
+name: e2e
+on:
+  push:
+    paths:
+      - "agent/**"
+      - "apps/api/**"
+      - "apps/web/**"
+      - "db/**"
+      - "deploy/**"
+      - "packages/protocol/**"
+      - ".github/workflows/e2e.yml"
+  pull_request:
+    paths:
+      - "agent/**"
+      - "apps/api/**"
+      - "apps/web/**"
+      - "db/**"
+      - "deploy/**"
+      - "packages/protocol/**"
+      - ".github/workflows/e2e.yml"
+permissions:
+  contents: read
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: apps/web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: false
+      - uses: azure/setup-helm@v4
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: ape-dev
+      - name: Start PostgreSQL and S3, apply migrations
+        run: |
+          cp .env.example .env
+          docker compose -f deploy/compose/docker-compose.yml --env-file .env up -d --build --wait postgres s3
+          set -a; . ./.env; set +a
+          docker run --rm --network host -v "$PWD/db:/db:ro" ghcr.io/amacneil/dbmate:2 \
+            --url "$MIGRATOR_DATABASE_URL" --migrations-dir /db/migrations --no-dump-schema up
+      - name: Build and load the agent image
+        run: |
+          docker build -t ghcr.io/skoc10/ape-agent:dev agent
+          kind load docker-image ghcr.io/skoc10/ape-agent:dev --name ape-dev
+      - name: Start api and web
+        run: |
+          set -a; . ./.env; set +a
+          (cd apps/api && uv sync --frozen && uv run uvicorn ape.server:app --factory --host 0.0.0.0 --port 8000 > /tmp/api.log 2>&1 &)
+          (cd apps/web && pnpm install --frozen-lockfile && pnpm build && (pnpm start > /tmp/web.log 2>&1 &))
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null http://localhost:3000/sign-in && curl -sf -o /dev/null http://localhost:8000/readyz && break
+            sleep 1
+          done
+      - name: End-to-end collection
+        working-directory: apps/web
+        run: |
+          set -a; . ../../.env; set +a
+          host_ip=$(docker exec ape-dev-control-plane sh -c "ip route | awk '/default/ {print \$3}'")
+          AGENT_ENDPOINT="ws://$host_ip:8000/v1/agent" node scripts/e2e-collect.mjs
+      - name: Logs
+        if: failure()
+        run: |
+          kubectl -n ape-system logs deploy/ape-agent --tail=50 || true
+          tail -50 /tmp/api.log /tmp/web.log || true

@@ -167,7 +167,33 @@ Ana plan: [`mvp-plan.md`](mvp-plan.md).
 - **Yayın:** `agent-release.yml`, `agent-v*` etiketi ya da elle tetiklemeyle imajı
   (amd64 + arm64) ve chart'ı `ghcr.io/skoc10` altına OCI olarak iter. Henüz çalıştırılmadı.
 
+### 2.6 Toplama uçtan uca ve ilk maskeleme (2026-11-25)
+
+- **Uç noktalar:** `POST/GET /v1/clusters/{id}/audits`, `GET /v1/audits/{run_id}`. Audit başlatma
+  owner/admin'e açık; ajan bağlı değilse ya da bir toplama sürüyorsa 409. Satır doğrudan
+  `collecting` durumunda açılır (ayrı bir `queued` adımı yok).
+- **Parça işleme (`ape/gateway/collection.py`):** sıra numarası, tür (izinli liste), nesne sayısı,
+  toplam boyut ve gzip açılım sınırı (parça başına 64 MiB) denetlenir; `collect_done` içindeki
+  parça sayısı, tür sayımları ve SHA-256 gelenle karşılaştırılır. Tutmayan her şey çalışmayı
+  `failed` yapar ve hiçbir şey saklanmaz. Ajan kopunca ya da `error` yollayınca da `failed`.
+- **Maskeleme (`ape/sanitize`):** bu hafta iki dedektör: `key_name` (hassas adlı alanlar ve
+  `{name, value}` çiftleri; `secretKeyRef`, `secretName` gibi yapısal alanlar korunur) ve `pem`.
+  Yer tutucu `<secret:tip:hmac4>`; HMAC anahtarı `MASKING_KEY`'den tenant başına türetilir.
+  Ajanın `<redacted:len=N>` değerlerine dokunulmaz; işlem deterministik ve idempotent.
+- **Ham veri yalnızca bellekte:** her parça thread'de çözülüp maskelenir, diske (geçici dosya) ve
+  S3'e yalnızca maskeli kopya yazılır. Anahtar `{org_id}/{run_id}/snapshot.json.gz` ve yalnızca
+  `ape/storage` tarafından tenant bağlamından üretilir.
+- **Yarım kalan çalışmalar:** 10 dakikadan eski `collecting` satırları yeni audit başlatılırken
+  `failed` yapılır (API yeniden başlarsa bellekteki durum kaybolur).
+- **Uçtan uca test:** `apps/web/scripts/e2e-collect.mjs` (panel, kind üzerinde helm ile ajan,
+  audit, S3'teki snapshot'ta ekili sırların olmadığı kontrolü). Yerelde 248 nesne, 12 parça ile
+  geçti; CI'da `e2e` iş akışı.
+
 ## Kullanıcı Aksiyonu Gerekenler
+
+- **`MASKING_KEY` (prod).** `.env.example` içindeki değer yalnızca yerel içindir; prod için
+  `openssl rand -base64 32` ile üretilip Secret'a konmalı ve sonradan değiştirilmemeli
+  (değişirse eski ve yeni çalışmaların yer tutucuları eşleşmez). 4.6'da.
 
 - **Ajan imajı ve chart'ının ilk yayını (2.5).** `git tag agent-v0.1.0 && git push origin
   agent-v0.1.0` (ya da Actions sekmesinden `agent-release`) çalıştırılmalı; ardından GitHub'da
