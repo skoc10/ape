@@ -111,6 +111,17 @@ export default async function Page({ params, searchParams }: PageProps<"/[orgSlu
 
       {audit.status === "completed" && (audit.pr_url || findings.some((f) => f.patch)) && (
         <section className="flex flex-wrap items-center gap-3">
+          {findings.some((f) => f.patch) && (
+            // Works without any repository connection: the patches as files, to apply with
+            // the access the reader already has.
+            <a
+              href={`/${orgSlug}/audits/${audit.id}/fixes.zip`}
+              data-testid="download-fixes"
+              className="rounded-lg border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+            >
+              Download fixes
+            </a>
+          )}
           {audit.pr_url ? (
             // The URL comes from GitHub through our API; only https links are rendered.
             audit.pr_url.startsWith("https://") && (
@@ -122,7 +133,8 @@ export default async function Page({ params, searchParams }: PageProps<"/[orgSlu
             <>
               <PullRequestButton orgSlug={orgSlug} runId={audit.id} />
               <span className="text-sm text-muted-foreground">
-                Proposes the patches below in the connected repository. Nothing is applied to the cluster.
+                Download the patches as files, or propose them in the connected repository. Nothing is applied
+                to the cluster.
               </span>
             </>
           )}

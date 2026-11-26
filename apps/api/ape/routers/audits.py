@@ -10,6 +10,7 @@ from ape.core.db import Database
 from ape.core.deps import CurrentPrincipal
 from ape.gateway.endpoint import AuditNotStartable, start_collection
 from ape.gateway.sessions import SessionRegistry
+from ape.reports.fixes import build_fix_bundle
 from ape.repos import audit_runs, clusters, findings
 from ape.storage import ObjectStore
 
@@ -183,3 +184,34 @@ async def get_report_pdf_link(
         principal.org_id, run_id, "pdf", filename=f"audit-{run_id}.pdf", expires_in=expires_in
     )
     return ReportLink(url=url, expires_in=expires_in)
+
+
+@router.get("/audits/{run_id}/fixes")
+async def download_fixes(run_id: UUID, principal: CurrentPrincipal, db: Db) -> Response:
+    """The audit's patches as a zip, one file per resource.
+
+    Needs no connection to a repository: whoever downloads it applies the patches with the
+    access they already have. Every member may download it; the same patches are part of
+    the findings they can read.
+    """
+    async with db.tenant(principal.org_id) as tc:
+        run = await audit_runs.get(tc, run_id)
+        if run is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "audit not found")
+        rows = await findings.list_for_run(tc, run_id)
+        cluster = await clusters.get(tc, run["cluster_id"])
+    if run["status"] != "completed":
+        raise HTTPException(status.HTTP_409_CONFLICT, "the audit is not completed yet")
+    bundle = build_fix_bundle(rows, cluster_name=str(cluster["name"]) if cluster else "cluster")
+    if not bundle.files:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "this audit has no patches to download")
+    log.info("fixes_downloaded", run_id=str(run_id), files=len(bundle.files))
+    return Response(
+        bundle.archive,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="audit-fixes-{run_id}.zip"',
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, no-store",
+        },
+    )

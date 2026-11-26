@@ -37,7 +37,7 @@ def requests_from_findings(rows: list[dict[str, Any]]) -> list[PatchRequest]:
     ]
 
 
-def _cell(text: str) -> str:
+def cell(text: str) -> str:
     """Text inside a Markdown table cell or line: no table breaks, HTML, links or mentions."""
     cleaned = " ".join(str(text).split())
     for char, replacement in (
@@ -66,8 +66,8 @@ def _applied_table(applied: list[Applied]) -> list[str]:
     lines = ["| Finding | Resource | File | Matched by |", "| --- | --- | --- | --- |"]
     for a in applied:
         lines.append(
-            f"| {_cell(a.request.rule_id)} {_cell(a.request.title)} | {_cell(str(a.request.target))} "
-            f"| {_cell(a.path)} | {_RULE_LABEL[a.rule]} |"
+            f"| {cell(a.request.rule_id)} {cell(a.request.title)} | {cell(str(a.request.target))} "
+            f"| {cell(a.path)} | {_RULE_LABEL[a.rule]} |"
         )
     return lines
 
@@ -82,8 +82,8 @@ def _manual_section(manual: list[Manual]) -> list[str]:
     ]
     for m in manual:
         lines += [
-            f"**{_cell(m.request.rule_id)} {_cell(m.request.title)}** on {_cell(str(m.request.target))}",
-            f"Reason: {_cell(m.reason)}",
+            f"**{cell(m.request.rule_id)} {cell(m.request.title)}** on {cell(str(m.request.target))}",
+            f"Reason: {cell(m.reason)}",
             "",
             _fence(m.request.patch),
             "",
@@ -108,15 +108,15 @@ def plan_pull_request(
     result = apply_patches(sources, [r for r in requests if not contains_placeholder(r.patch)])
     result.manual += [Manual(r, "the patch contains a masked value") for r in masked]
     date = now.strftime("%Y-%m-%d")
-    title = f"Kubernetes audit fixes for {_cell(cluster_name)} ({date})"
+    title = f"Kubernetes audit fixes for {cell(cluster_name)} ({date})"
     body = [
-        f"Fixes proposed by the Kubernetes audit of **{_cell(cluster_name)}** on {date}.",
+        f"Fixes proposed by the Kubernetes audit of **{cell(cluster_name)}** on {date}.",
         "",
         "Nothing was applied to the cluster. Review the changes, merge, and deploy through your usual process.",
         "",
         "## Summary",
         "",
-        _cell(summary) if summary else "See the findings below.",
+        cell(summary) if summary else "See the findings below.",
         "",
     ]
     if score is not None:

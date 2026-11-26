@@ -458,6 +458,29 @@ başına 40 tavan) hacimle tabana vuruyordu. Kararlar:
 - Rapor (iframe ve PDF) bilerek açık temada kalır: beyaz etiketli, yazdırılabilir çıktı.
   Logo önizlemesi de beyaz zeminde kalır.
 
+### GitHub entegrasyonu: gerçek kullanım değerlendirmesi ve "Download fixes" (2026-11-26)
+
+4.7'de görülen engel: GitHub bir App'i organizasyona kurmayı yalnızca owner'a izin verir;
+freelancer müşteri reposuna yazabilse de genelde owner değildir. Kararlar:
+
+- **Varsayılan yol artık indirme:** `GET /v1/audits/{id}/fixes` (panelde "Download fixes",
+  `/[orgSlug]/audits/[runId]/fixes.zip`). Zip: kaynak başına tek strategic merge patch
+  (`patches/<namespace|cluster-scoped>/<kind>-<name>.yaml`, tam kimlikli: apiVersion, kind,
+  metadata), `kustomization.example.yaml`, `README.md`. Kurulum, onay ve saklanan kimlik
+  bilgisi yok; her git sağlayıcısında çalışır. Kod: `apps/api/ape/reports/fixes.py`.
+- Güvenlik: maskeli değer içeren yama zip'e girmez (README'de "Not included"); yamanın
+  iddia ettiği kind/ad yok sayılır, denetlenen kaynağın kimliği yazılır; dosya adları
+  temizlenir; YAML tırnakları korunur (`yes`/`on` YAML 1.1'de boolean olur). Her üye
+  indirebilir (aynı yamalar bulgularda zaten okunabiliyor).
+- **Reddedilenler:** App secret'ını panelden yönetmek (platform yöneticisi rolü ve DB'de
+  private key gerektirir, asıl engeli çözmez); müşteri başına App (manifest akışı; owner
+  engeli aynen kalır, her müşterinin private key'i bizde durur); PAT saklamak.
+- **Sıradaki (onaylanan yön, henüz yapılmadı):** kurulumu bağlamadan ayırmak: owner'a
+  gönderilebilir kurulum linki, freelancer'ın kendi GitHub yetkisiyle "Bağla" (push
+  edebildiği repolar). Sonra: cluster başına repo/klasör eşlemesi, Helm/Kustomize
+  farkındalığı, GitLab ve Azure Repos.
+- Öneri (kullanıcıya iletildi): App kişisel hesaptan bir GitHub organizasyonuna taşınmalı.
+
 ## Kullanıcı Aksiyonu Gerekenler
 
 - **`ape-secrets` yedeği (4.6).** `kubectl -n ape get secret ape-secrets -o yaml` çıktısı güvenli bir
