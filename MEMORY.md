@@ -481,6 +481,27 @@ freelancer müşteri reposuna yazabilse de genelde owner değildir. Kararlar:
   farkındalığı, GitLab ve Azure Repos.
 - Öneri (kullanıcıya iletildi): App kişisel hesaptan bir GitHub organizasyonuna taşınmalı.
 
+### LLM bütçesi ve şablon yamalar (2026-11-26)
+
+İlk LLM'li gerçek audit (178 bulgu) 300 bin token bütçesini doldurdu: 150 bulgu LLM'den,
+28'i şablondan; yalnızca 10 yama çıktı. Kararlar:
+
+- **Seçim** (`select_for_model`, `apps/api/ape/analysis/analyst.py`): model en önemliden
+  başlayarak sorulur; platform bileşeni bulguları hiç gönderilmez (düzeltilecek bir şey yok,
+  ayrıca LLM'in onların önemini yükseltmesi de böylece kapanır); `low`/`info` bulgulardan
+  kural başına en fazla `LLM_LOW_SAMPLES_PER_RULE` (varsayılan 3) gönderilir, kalanı kuralın
+  şablon metnini alır. 0 örneklemeyi kapatır. `stats.llm.skipped_by_policy` sayıyı tutar.
+- **Manifest tekrarı kalktı:** prompt'ta her kaynağın manifesti `resources` altında bir kez
+  gider, bulgular kind/namespace/ad ile başvurur.
+- **Şablon yama** (`apps/api/ape/analysis/template_patches.py`): yalnızca değeri her
+  workload için aynı olan düzeltme: SEC-004 (`allowPrivilegeEscalation: false`; privileged
+  ya da SYS_ADMIN'li container atlanır). LLM kapalıyken ya da yama yazmadığında kullanılır,
+  aynı placeholder kontrolünden geçer. Probe (path/port), PDB (yeni kaynak, mevcut yama
+  modeli yalnızca bulgunun kendi kaynağını yamalar), kaynak boyutları ve kullanıcı id'si
+  bilerek kapsam dışı: değer tahmini gerekir. `stats.llm.template_patches` sayıyı tutar.
+- Backlog: PDB ve NetworkPolicy gibi **yeni kaynak** öneren düzeltmeler için zip'e
+  "eklenecek manifestler" bölümü; örneklenen düşük bulgular için grup düzeyinde LLM metni.
+
 ## Kullanıcı Aksiyonu Gerekenler
 
 - **`ape-secrets` yedeği (4.6).** `kubectl -n ape get secret ape-secrets -o yaml` çıktısı güvenli bir

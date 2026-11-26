@@ -77,6 +77,9 @@ class Settings(BaseSettings):
     llm_output_mode: str = "native"
     llm_batch_size: int = 25
     llm_max_tokens_per_run: int = 300_000
+    # How many low findings of one rule are explained by the model; the rest of that rule
+    # get the rule's template text. 0 sends every finding.
+    llm_low_samples_per_rule: int = 3
     llm_request_timeout_seconds: float = 180.0
 
     # Worker (queue consumer for rules, LLM and reports).

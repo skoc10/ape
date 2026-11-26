@@ -15,9 +15,10 @@ from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.openai import OpenAIChatModel
 
-from ape.analysis.analyst import SYSTEM_PROMPT, Analyst, _template_top_risks
+from ape.analysis.analyst import SYSTEM_PROMPT, Analyst, _template_top_risks, select_for_model
 from ape.analysis.model import build_model
 from ape.analysis.pipeline import Pipeline
+from ape.analysis.template_patches import template_patch
 from ape.core.config import Settings
 from ape.core.db import Database
 from ape.observability.metrics import Metrics
@@ -217,7 +218,8 @@ async def test_unknown_fingerprints_and_bad_patches_are_dropped(
     assert result.dropped_unknown == 1
     assert "f" * 64 not in result.enriched
     assert result.dropped_patches == 3
-    ordered = [result.enriched[f.fingerprint] for f in found]
+    # The model is asked in order of severity, so that is the order of its answers.
+    ordered = [result.enriched[f.fingerprint] for f in select_for_model(found, 3)]
     assert [e.patch is None for e in ordered[:5]] == [True, True, True, True, False]
     assert ordered[0].explanation.startswith("Explained")  # the text is kept, only the patch goes
 
@@ -343,7 +345,8 @@ async def test_without_an_llm_the_report_uses_template_text(
             info.explanation,
             info.remediation,
         )
-        assert row["patch"] is None
+        # The one fix that needs no model and no guessed value.
+        assert (row["patch"] is not None) == (row["rule_id"] == "SEC-004")
     stats = run_row(admin_db, run_id)["stats"]
     assert stats["llm"] == {
         "enabled": False,
@@ -359,6 +362,8 @@ async def test_without_an_llm_the_report_uses_template_text(
         "dropped_patches": 0,
         "ignored_severity_downgrades": 0,
         "budget_exhausted": False,
+        "skipped_by_policy": 0,
+        "template_patches": 1,
     }
     assert stats["summary"].startswith("The audit found 18 issues (3 critical")
     assert len(stats["top_risks"]) == 5 and stats["top_risks"][0].startswith(
@@ -448,10 +453,11 @@ async def test_a_patch_that_contains_a_placeholder_is_dropped(
         return findings
 
     result = await analyst(settings, db, Scripted(mutate).model()).analyse("org_x", objects, found)
+    asked = select_for_model(found, 3)
     assert result.dropped_patches == 2
-    assert result.enriched[found[0].fingerprint].patch is None
-    assert result.enriched[found[1].fingerprint].patch is None
-    assert result.enriched[found[2].fingerprint].patch is not None
+    assert result.enriched[asked[0].fingerprint].patch is None
+    assert result.enriched[asked[1].fingerprint].patch is None
+    assert result.enriched[asked[2].fingerprint].patch is not None
 
 
 def test_template_top_risks_group_by_rule_so_one_noisy_rule_does_not_fill_the_list() -> None:
@@ -469,3 +475,121 @@ def test_template_top_risks_group_by_rule_so_one_noisy_rule_does_not_fill_the_li
         "Single replica without a PodDisruptionBudget: 40 resources, "
         "for example Deployment/shop/svc-00",
     ]
+
+
+# --- task 4.7: budget and template patches -------------------------------------------
+
+
+def _finding(rule_id: str, severity: str, name: str, **evidence: Any) -> Finding:
+    info = RULES[rule_id]
+    resource = ResourceRef("Deployment", "shop", name)
+    return Finding(rule_id, info.category, severity, info.title, resource, evidence)  # type: ignore[arg-type]
+
+
+def test_the_model_is_asked_about_what_matters_first_and_only_samples_of_repeated_lows() -> None:
+    found = [_finding("REL-002", "low", f"svc-{i:02d}") for i in range(60)]
+    found += [_finding("COST-001", "low", f"job-{i}") for i in range(2)]
+    found += [_finding("SEC-003", "medium", f"api-{i}") for i in range(10)]
+    found += [_finding("SEC-001", "critical", "agent")]
+    found += [_finding("RBAC-004", "low", "argocd-server", platformComponent="Argo CD")]
+
+    selected = select_for_model(found, 3)
+    assert [f.severity for f in selected] == ["critical"] + ["medium"] * 10 + ["low"] * 5
+    assert [f.rule_id for f in selected[11:]] == ["COST-001"] * 2 + ["REL-002"] * 3
+    # Expected by design, nothing to fix: never worth a model call.
+    assert all("platformComponent" not in f.evidence for f in selected)
+    # 0 turns the sampling off; platform components stay out.
+    assert len(select_for_model(found, 0)) == len(found) - 1
+
+
+async def test_skipped_findings_get_template_text_and_manifests_are_sent_once(
+    settings: Settings, db: Database
+) -> None:
+    objects = vulnerable_objects()
+    found = run_rules(objects)
+    payloads: list[dict[str, Any]] = []
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        for part in messages[-1].parts:
+            content = getattr(part, "content", None)
+            if isinstance(content, str) and '"findings"' in content:
+                payloads.append(json.loads(content[content.index("{") :]))
+        args = {
+            "executive_summary": "ok",
+            "top_risks": [],
+            "findings": [answer(item) for item in payloads[-1]["findings"]],
+        }
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, args)])
+
+    subject = analyst(
+        settings, db, FunctionModel(respond), llm_batch_size=50, llm_low_samples_per_rule=1
+    )
+    result = await subject.analyse("org_x", objects, found)
+    lows = [f for f in found if f.severity == "low"]
+    asked_lows = {f.rule_id for f in lows}
+    assert result.skipped_by_policy == len(lows) - len(asked_lows)
+    assert len(result.enriched) == len(found) - result.skipped_by_policy
+
+    payload = payloads[0]
+    assert all("manifest" not in f for f in payload["findings"])
+    identities = [
+        (r["kind"], r["metadata"].get("namespace"), r["metadata"]["name"])
+        for r in payload["resources"]
+    ]
+    assert len(identities) == len(set(identities)) < len(payload["findings"])
+    referenced = {
+        (f["resource"]["kind"], f["resource"]["namespace"], f["resource"]["name"])
+        for f in payload["findings"]
+    }
+    assert referenced <= set(identities)
+
+
+def test_template_patch_only_for_fixes_that_need_no_guessed_value() -> None:
+    def workload(kind: str, pod_spec: dict[str, Any]) -> dict[str, Any]:
+        if kind == "CronJob":
+            spec: dict[str, Any] = {"jobTemplate": {"spec": {"template": {"spec": pod_spec}}}}
+        elif kind == "Pod":
+            spec = pod_spec
+        else:
+            spec = {"template": {"spec": pod_spec}}
+        return {"kind": kind, "metadata": {"name": "web", "namespace": "shop"}, "spec": spec}
+
+    pod_spec = {
+        "containers": [
+            {"name": "app"},
+            {"name": "done", "securityContext": {"allowPrivilegeEscalation": False}},
+            # The API server rejects these together with allowPrivilegeEscalation: false.
+            {"name": "priv", "securityContext": {"privileged": True}},
+            {"name": "admin", "securityContext": {"capabilities": {"add": ["SYS_ADMIN"]}}},
+        ],
+        "initContainers": [{"name": "init"}],
+    }
+    finding = _finding("SEC-004", "medium", "web")
+    patch = yaml.safe_load(template_patch(finding, workload("Deployment", pod_spec)) or "")
+    off = {"securityContext": {"allowPrivilegeEscalation": False}}
+    assert patch == {
+        "spec": {
+            "template": {
+                "spec": {
+                    "containers": [{"name": "app", **off}],
+                    "initContainers": [{"name": "init", **off}],
+                }
+            }
+        }
+    }
+    cron = Finding("SEC-004", "security", "medium", "t", ResourceRef("CronJob", "shop", "web"), {})
+    nested = yaml.safe_load(template_patch(cron, workload("CronJob", pod_spec)) or "")
+    assert nested["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"] == [
+        {"name": "app", **off}
+    ]
+    # Nothing left to change, no manifest, or a rule whose fix needs a value.
+    assert (
+        template_patch(finding, workload("Deployment", {"containers": [pod_spec["containers"][1]]}))
+        is None
+    )
+    assert template_patch(finding, None) is None
+    for rule_id in ("REL-001", "REL-002", "COST-001", "SEC-003", "SEC-005", "RBAC-003"):
+        assert (
+            template_patch(_finding(rule_id, "medium", "web"), workload("Deployment", pod_spec))
+            is None
+        )
