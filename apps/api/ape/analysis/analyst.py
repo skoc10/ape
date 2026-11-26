@@ -301,12 +301,15 @@ def _template_summary(found: list[Finding]) -> str:
 
 
 def _template_top_risks(found: list[Finding]) -> list[str]:
-    ranked = sorted(found, key=lambda f: (_SEVERITY_RANK[f.severity], f.rule_id, str(f.resource)))
+    """One line per (severity, rule), worst first, so one noisy rule cannot fill the list."""
+    groups: dict[tuple[int, str], list[Finding]] = {}
+    for finding in sorted(found, key=lambda f: str(f.resource)):
+        groups.setdefault((_SEVERITY_RANK[finding.severity], finding.rule_id), []).append(finding)
     risks: list[str] = []
-    for finding in ranked:
-        line = f"{finding.title}: {finding.resource}"
-        if line not in risks:
-            risks.append(line)
-        if len(risks) == 5:
-            break
+    for _, members in sorted(groups.items(), key=lambda g: (g[0][0], -len(g[1]), g[0][1]))[:5]:
+        first = members[0]
+        if len(members) == 1:
+            risks.append(f"{first.title}: {first.resource}")
+        else:
+            risks.append(f"{first.title}: {len(members)} resources, for example {first.resource}")
     return risks

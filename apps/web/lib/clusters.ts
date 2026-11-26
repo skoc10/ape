@@ -41,6 +41,9 @@ export type AuditFinding = {
   remediation: string | null;
   patch: string | null;
   recurring: boolean;
+  // Small proof of the finding. `platformComponent` is set when the object belongs to a
+  // well-known component (Argo CD, cert-manager, ...) that needs this access by design.
+  evidence?: { platformComponent?: string } & Record<string, unknown>;
 };
 
 export type AuditRun = {

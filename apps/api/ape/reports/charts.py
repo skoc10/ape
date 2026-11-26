@@ -28,26 +28,27 @@ def score_ring(score: int, color: str) -> str:
     )
 
 
-def category_bars(counts: dict[str, int], color: str) -> str:
-    """Horizontal bars: number of findings per category."""
-    row_height, label_width, bar_width = 26, 90, 260
-    largest = max([*counts.values(), 1])
+def category_bars(scores: dict[str, int], counts: dict[str, int], color: str) -> str:
+    """Horizontal bars: score of each category, with its number of findings."""
+    row_height, label_width, bar_width = 26, 90, 220
     height = row_height * len(CATEGORIES)
     parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{label_width + bar_width + 40}" '
-        f'height="{height}" role="img" aria-label="Findings per category">'
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{label_width + bar_width + 130}" '
+        f'height="{height}" role="img" aria-label="Score per category">'
     ]
     for index, category in enumerate(CATEGORIES):
         count = counts.get(category, 0)
+        score = max(0, min(100, scores.get(category, 100)))
+        noun = "finding" if count == 1 else "findings"
         y = index * row_height
-        width = bar_width * count / largest
+        width = bar_width * score / 100
         parts.append(
             f'<text x="0" y="{y + 17}" font-size="12" fill="#374151">{category}</text>'
             f'<rect x="{label_width}" y="{y + 6}" width="{bar_width}" height="14" rx="3" fill="{_TRACK}"/>'
             f'<rect x="{label_width}" y="{y + 6}" width="{width:.1f}" height="14" rx="3" '
             f'fill="{escape(color)}"/>'
             f'<text x="{label_width + bar_width + 8}" y="{y + 17}" font-size="12" '
-            f'fill="#111827">{count}</text>'
+            f'fill="#111827">{score} / 100 &#183; {count} {noun}</text>'
         )
     parts.append("</svg>")
     return "".join(parts)

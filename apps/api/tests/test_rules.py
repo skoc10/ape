@@ -245,6 +245,55 @@ def test_rbac_004_list_secrets() -> None:
     assert ids(run_rules([wildcard]), "RBAC-004") == []
 
 
+def test_platform_components_are_reported_low_and_labelled() -> None:
+    everything = [{"apiGroups": ["*"], "resources": ["*"], "verbs": ["*"]}]
+    secrets = [{"apiGroups": [""], "resources": ["secrets"], "verbs": ["list"]}]
+    subject = [{"kind": "Group", "name": "ops"}]
+    exporter = deployment(pod={"hostNetwork": True})
+    exporter["metadata"]["name"] = "kube-prometheus-stack-prometheus-node-exporter"
+    found = run_rules(
+        [
+            role("ClusterRole", "argocd-application-controller", everything),
+            role("ClusterRole", "cert-manager-controller-issuers", secrets),
+            role("Role", "ingress-nginx-internal", secrets, "edge"),
+            role("ClusterRole", "secretproviderrotation-role", secrets),
+            binding("aks-cluster-admin-binding", "cluster-admin", subject),
+            exporter,
+            # Not platform components: a similar name is not enough, and neither is
+            # living in a namespace that is named like one.
+            role("ClusterRole", "argocdx", everything),
+            role("Role", "reader", secrets, "argocd"),
+            binding("team-admin", "cluster-admin", subject),
+        ]
+    )
+    by_design = {
+        str(f.resource): f.evidence.get("platformComponent")
+        for f in found
+        if f.rule_id in {"RBAC-001", "RBAC-002", "RBAC-004", "SEC-002"}
+    }
+    assert by_design == {
+        "ClusterRole/-/argocd-application-controller": "Argo CD",
+        "ClusterRole/-/cert-manager-controller-issuers": "cert-manager",
+        "Role/edge/ingress-nginx-internal": "ingress-nginx",
+        "ClusterRole/-/secretproviderrotation-role": "Secrets Store CSI driver",
+        "ClusterRoleBinding/-/aks-cluster-admin-binding": "Azure Kubernetes Service",
+        "Deployment/shop/kube-prometheus-stack-prometheus-node-exporter": "Prometheus stack",
+        "ClusterRole/-/argocdx": None,
+        "Role/argocd/reader": None,
+        "ClusterRoleBinding/-/team-admin": None,
+    }
+    for f in found:
+        if f.evidence.get("platformComponent"):
+            assert f.severity == "low"
+    severity = {str(f.resource): f.severity for f in found if f.rule_id != "SEC-002"}
+    assert severity["ClusterRole/-/argocdx"] == "critical"
+    assert severity["ClusterRoleBinding/-/team-admin"] == "critical"
+    # Only access the component needs by design is rated down: its other gaps are the
+    # customer's to configure and keep their severity.
+    others = [f for f in found if f.resource.name.startswith("kube-prometheus-stack")]
+    assert all("platformComponent" not in f.evidence for f in others if f.rule_id != "SEC-002")
+
+
 # --- network -----------------------------------------------------------------------
 
 

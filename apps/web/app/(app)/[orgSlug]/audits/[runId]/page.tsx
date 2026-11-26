@@ -167,6 +167,9 @@ export default async function Page({ params, searchParams }: PageProps<"/[orgSlu
                     {finding.rule_id}
                   </Badge>
                   {finding.recurring && <Badge variant="secondary">recurring</Badge>}
+                  {typeof finding.evidence?.platformComponent === "string" && (
+                    <Badge variant="outline">{finding.evidence.platformComponent}</Badge>
+                  )}
                 </div>
                 <CardTitle className="mt-2">{finding.title}</CardTitle>
                 <CardDescription className="font-mono text-xs">

@@ -423,6 +423,32 @@ yapılmamalı; ağır doğrulamalar CI'da.
   `api` ve `worker` aynı metrik adlarını dışa veriyor (kullanılmayanlar 0). Chart 0.1.1 henüz
   yayınlanmadı (bir sonraki `cp-v*` etiketiyle).
 
+### 4.7 İlk gerçek audit ve skor kalibrasyonu (2026-11-26)
+
+İlk gerçek cluster (AKS, 1050 nesne, 178 bulgu) 0/100 aldı; ilk model (100'den düş, kategori
+başına 40 tavan) hacimle tabana vuruyordu. Kararlar:
+
+- **Skor modeli değişti** (`apps/api/ape/reports/scoring.toml`, tek kaynak): her kategori
+  0-100 kendi skorunu alır (`100 * half / (half + ceza)`, `half = 20`), toplam ağırlıklı
+  ortalamadır (security 30, rbac 25, reliability 20, network 15, cost 10). Aynı kuralın
+  tekrarları azalan ağırlıkla sayılır (`factor = 0.5`: bir kural en kötü bulgusunun en fazla
+  2 katı ceza üretir). Ceza puanları: critical 25, high 10, medium 3, low 1, info 0.
+  Kalibrasyon noktaları: temiz cluster 100, tek critical 83, bu AKS cluster'ı 64, kasıtlı
+  bozuk test seti 49. `stats.score` artık `{total, categories}` (eski `deductions` yok).
+- **Bilinen platform bileşenleri** (`apps/api/ape/rules/platform.py`): Argo CD, cert-manager,
+  ingress-nginx, Prometheus stack, AKS/EKS/GKE bileşenleri vb. için tasarım gereği geniş
+  erişim bulguları (yalnızca RBAC-001, RBAC-002, RBAC-004, SEC-002) silinmez; `low` olur ve
+  `evidence.platformComponent` ile etiketlenir. Eşleşme yalnızca nesne adının önekiyle
+  yapılır (namespace adı yetmez). Bu bir kanıt değil gelenektir: aynı adı taşıyan sahte bir
+  nesne de düşük görünür; bu yüzden bulgu hiçbir zaman gizlenmiyor. Bileşenlerin diğer
+  bulguları (probe, kaynak, NetworkPolicy) normal önemde kalır.
+- **Top risks** (şablon yolu): (önem, kural) başına tek satır, "N resources, for example X".
+- Rapor: kategori çubukları artık kategori skorunu ve bulgu sayısını gösterir.
+- Eski audit'lerin kayıtlı skoru değişmez; yeni skor için audit yeniden çalıştırılır.
+- Backlog: platform listesi ve muafiyetler workspace bazında ayarlanabilir olmalı (v1.1);
+  LLM yolu açıkken LLM'in bir platform bulgusunun önemini yükseltmesi mümkün (yalnızca
+  düşürme engelli).
+
 ## Kullanıcı Aksiyonu Gerekenler
 
 - **`ape-secrets` yedeği (4.6).** `kubectl -n ape get secret ape-secrets -o yaml` çıktısı güvenli bir

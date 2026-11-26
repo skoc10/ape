@@ -15,13 +15,13 @@ from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.openai import OpenAIChatModel
 
-from ape.analysis.analyst import SYSTEM_PROMPT, Analyst
+from ape.analysis.analyst import SYSTEM_PROMPT, Analyst, _template_top_risks
 from ape.analysis.model import build_model
 from ape.analysis.pipeline import Pipeline
 from ape.core.config import Settings
 from ape.core.db import Database
 from ape.observability.metrics import Metrics
-from ape.rules import RULES, Finding, run_rules
+from ape.rules import RULES, Finding, ResourceRef, run_rules
 from ape.sanitize import MaskedPayload
 from ape.storage import ObjectStore
 
@@ -452,3 +452,20 @@ async def test_a_patch_that_contains_a_placeholder_is_dropped(
     assert result.enriched[found[0].fingerprint].patch is None
     assert result.enriched[found[1].fingerprint].patch is None
     assert result.enriched[found[2].fingerprint].patch is not None
+
+
+def test_template_top_risks_group_by_rule_so_one_noisy_rule_does_not_fill_the_list() -> None:
+    def make(rule_id: str, severity: str, name: str) -> Finding:
+        info = RULES[rule_id]
+        resource = ResourceRef("Deployment", "shop", name)
+        return Finding(rule_id, info.category, severity, info.title, resource, {})  # type: ignore[arg-type]
+
+    found = [make("REL-002", "low", f"svc-{i:02d}") for i in range(40)]
+    found += [make("SEC-003", "medium", f"api-{i}") for i in range(3)]
+    found += [make("SEC-001", "critical", "agent")]
+    assert _template_top_risks(found) == [
+        "Privileged container: Deployment/shop/agent",
+        "Container may run as root: 3 resources, for example Deployment/shop/api-0",
+        "Single replica without a PodDisruptionBudget: 40 resources, "
+        "for example Deployment/shop/svc-00",
+    ]

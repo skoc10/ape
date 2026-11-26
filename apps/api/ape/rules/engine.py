@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 from ape.rules.model import RULES, Finding, ResourceRef, Severity
+from ape.rules.platform import platform_component
 from ape.rules.snapshot import (
     Obj,
     Snapshot,
@@ -32,6 +33,11 @@ def _finding(
     severity: Severity | None = None,
 ) -> Finding:
     info = RULES[rule_id]
+    component = platform_component(rule_id, resource)
+    if component is not None:
+        # Expected for this component: kept in the report, but not as a top risk.
+        severity = "low"
+        evidence = {**evidence, "platformComponent": component}
     return Finding(
         rule_id, info.category, severity or info.severity, info.title, resource, evidence
     )

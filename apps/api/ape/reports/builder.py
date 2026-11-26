@@ -18,6 +18,11 @@ from ape.storage import ObjectStore
 log = structlog.get_logger(__name__)
 
 
+def _component(evidence: Any) -> str | None:
+    value = evidence.get("platformComponent") if isinstance(evidence, dict) else None
+    return value if isinstance(value, str) and value else None
+
+
 class Reporter:
     def __init__(
         self, db: Database, store: ObjectStore, metrics: Metrics, *, pdf: bool = True
@@ -36,12 +41,13 @@ class Reporter:
             audit = await audit_runs.get(tc, run.id)
         branding = settings["branding"] or {}
         logo = await self._store.get_logo(run.org_id) if branding.get("logo_key") else None
-        score = compute_score((r["category"], r["severity"]) for r in rows)
+        score = compute_score((r["category"], r["severity"], r["rule_id"]) for r in rows)
 
         data = ReportData(
             cluster_name=str(cluster["name"]) if cluster else "cluster",
             generated_at=datetime.now(UTC),
             score=score.total,
+            category_scores=score.categories,
             summary=str(stats.get("summary") or ""),
             top_risks=[str(r) for r in stats.get("top_risks") or []],
             truncated=bool(audit and (audit["stats"] or {}).get("truncated")),
@@ -66,6 +72,7 @@ class Reporter:
                     remediation=r["remediation"],
                     patch=r["patch"],
                     recurring=bool(r["recurring"]),
+                    platform_component=_component(r["evidence"]),
                 )
                 for r in rows
             ],
@@ -96,7 +103,7 @@ class Reporter:
             await audit_runs.set_report(tc, run.id, score=score.total, report_key=report_key)
         log.info("report_built", run_id=str(run.id), score=score.total, pdf=report_key is not None)
         return {
-            "score": {"total": score.total, "deductions": score.deductions},
+            "score": {"total": score.total, "categories": score.categories},
             "report": {
                 "html": True,
                 "pdf": report_key is not None,
