@@ -449,6 +449,15 @@ başına 40 tavan) hacimle tabana vuruyordu. Kararlar:
   LLM yolu açıkken LLM'in bir platform bulgusunun önemini yükseltmesi mümkün (yalnızca
   düşürme engelli).
 
+### Panel: dark mode (2026-11-26)
+
+- `next-themes` (zaten bağımlılıktı, sonner kullanıyordu): `class` stratejisi, varsayılan
+  `system`, seçim tarayıcıda `localStorage`'da (`theme`). Sunucu tarafında kullanıcı ayarı
+  yok; cihaz başına tercih yeterli görüldü.
+- Seçici (Light / Dark / System) üst çubukta, giriş/kayıt ve onboarding ekranlarında.
+- Rapor (iframe ve PDF) bilerek açık temada kalır: beyaz etiketli, yazdırılabilir çıktı.
+  Logo önizlemesi de beyaz zeminde kalır.
+
 ## Kullanıcı Aksiyonu Gerekenler
 
 - **`ape-secrets` yedeği (4.6).** `kubectl -n ape get secret ape-secrets -o yaml` çıktısı güvenli bir
