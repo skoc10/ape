@@ -136,14 +136,14 @@ def _dump_file(file: _File) -> str:
     return buffer.getvalue()
 
 
-def _merge(target: Any, patch: Any) -> Any:
+def merge_patch(target: Any, patch: Any) -> Any:
     """Strategic-merge-like deep merge of ``patch`` into ``target`` (modified in place)."""
     if isinstance(target, CommentedMap) and isinstance(patch, dict):
         for key, value in patch.items():
             if value is None:
                 target.pop(key, None)  # null deletes the key, as in a merge patch
             elif key in target:
-                target[key] = _merge(target[key], value)
+                target[key] = merge_patch(target[key], value)
             else:
                 target[key] = value
         return target
@@ -163,7 +163,7 @@ def _merge(target: Any, patch: Any) -> Any:
         by_key = {item[merge_key]: item for item in target}
         for item in patch:
             if item[merge_key] in by_key:
-                _merge(by_key[item[merge_key]], item)
+                merge_patch(by_key[item[merge_key]], item)
             else:
                 target.append(item)
         return target
@@ -290,7 +290,7 @@ def apply_patches(sources: dict[str, str], requests: list[PatchRequest]) -> Patc
             result.manual.append(Manual(request, matched))
             continue
         document, rule = matched
-        _merge(document.data, patch)
+        merge_patch(document.data, patch)
         files[document.path].changed = True
         result.applied.append(Applied(request, document.path, rule))
 
