@@ -23,7 +23,7 @@ from ape.core.db import Database
 from ape.observability.metrics import Metrics
 from ape.reports.builder import Reporter
 from ape.reports.render import ReportData, ReportFinding, render_html, render_pdf
-from ape.reports.scoring import ScoringConfig, compute_score, load_config
+from ape.reports.scoring import CATEGORIES, ScoringConfig, compute_score, load_config
 from ape.storage import ObjectStore
 
 from .conftest import Tenant, TokenFactory, bearer
@@ -46,41 +46,76 @@ def quiet_queue(admin_db: psycopg.Connection[Any]) -> None:
 # --- score ---------------------------------------------------------------------------
 
 
-def test_score_uses_the_configured_weights() -> None:
+def test_score_uses_the_configured_numbers() -> None:
     config = load_config()
-    assert config.deduction == {"critical": 15, "high": 8, "medium": 3, "low": 1, "info": 0}
-    assert config.max_per_category == 40
+    assert config.penalty == {"critical": 25, "high": 10, "medium": 3, "low": 1, "info": 0}
+    assert config.repeat_factor == 0.5 and config.half == 20
+    assert config.category_weight == {
+        "security": 30,
+        "rbac": 25,
+        "network": 15,
+        "reliability": 20,
+        "cost": 10,
+    }
 
-    assert compute_score([]).total == 100
-    assert compute_score([("security", "critical")]).total == 85
-    mixed = compute_score(
-        [
-            ("security", "critical"),
-            ("security", "high"),
-            ("rbac", "medium"),
-            ("cost", "low"),
-            ("cost", "info"),
-        ]
+    clean = compute_score([])
+    assert clean.total == 100 and set(clean.categories.values()) == {100}
+    # One critical: 100 * 20 / (20 + 25) = 44 for the category, which is 30% of the total.
+    one = compute_score([("security", "critical", "SEC-001")])
+    assert one.categories["security"] == 44 and one.total == 83
+    assert compute_score([("cost", "info", "COST-001")]).total == 100
+    # The same finding hurts more in a category with a larger share.
+    assert (
+        compute_score([("security", "high", "SEC-002")]).total
+        < compute_score([("cost", "high", "COST-001")]).total
     )
-    assert mixed.total == 100 - 15 - 8 - 3 - 1
-    assert mixed.deductions == {"cost": 1, "rbac": 3, "security": 23}
 
 
-def test_score_is_capped_per_category_and_never_negative() -> None:
-    # Ten criticals in one category cost 40, not 150.
-    assert compute_score([("security", "critical")] * 10).total == 60
-    everything = [
-        (category, "critical")
-        for category in ("security", "rbac", "network", "cost", "reliability")
-    ] * 10
-    assert compute_score(everything).total == 0
+def test_repeated_findings_of_one_rule_count_less_each_time() -> None:
+    def security(count: int, rule: str = "SEC-003") -> int:
+        return compute_score([("security", "medium", rule)] * count).categories["security"]
+
+    assert security(1) > security(2) > security(5) >= security(20)
+    # The series converges: sixty deployments with the same gap are one problem.
+    assert security(60) == security(600) == 77
+    # The same number of findings spread over different rules is a broader problem.
+    spread = compute_score([("security", "medium", f"SEC-00{i}") for i in range(1, 6)]).categories[
+        "security"
+    ]
+    assert spread < security(5)
+    # The most severe finding of a rule takes the full weight, whatever the order.
+    mixed = [("rbac", "high", "RBAC-001"), ("rbac", "critical", "RBAC-001")]
+    assert compute_score(mixed) == compute_score(mixed[::-1])
+    assert compute_score(mixed).categories["rbac"] == round(100 * 20 / (20 + 25 + 10 * 0.5))
+
+
+def test_score_never_reaches_zero_by_volume_and_orders_clusters_sensibly() -> None:
+    # The first real cluster (task 4.7): 178 findings scored 0 with the first model.
+    noisy = (
+        [("reliability", "low", "REL-002")] * 63
+        + [("reliability", "medium", "REL-001")] * 11
+        + [("cost", "low", "COST-001")] * 18
+        + [("cost", "low", "COST-002")] * 30
+        + [("rbac", "low", "RBAC-004")] * 23
+        + [("rbac", "medium", "RBAC-003")] * 5
+        + [("security", "medium", "SEC-003")] * 8
+        + [("security", "medium", "SEC-004")] * 8
+    )
+    typical = compute_score(noisy)
+    assert 55 <= typical.total <= 80
+    broken = compute_score(
+        noisy
+        + [("security", "critical", "SEC-001")] * 3
+        + [("rbac", "critical", "RBAC-002")] * 2
+        + [("security", "high", "SEC-002")] * 4
+    )
+    assert 0 < broken.total < typical.total - 10
+    worst = compute_score([(c, "critical", f"{c}-{i}") for c in CATEGORIES for i in range(10)])
+    assert 0 < worst.total < 20
     custom = ScoringConfig(
-        {"critical": 50, "high": 0, "medium": 0, "low": 0, "info": 0}, max_per_category=60
+        penalty={"critical": 30.0}, repeat_factor=0.0, half=30.0, category_weight={"security": 1.0}
     )
-    assert compute_score([("security", "critical")] * 2, custom).total == 40
-
-
-# --- HTML ----------------------------------------------------------------------------
+    assert compute_score([("security", "critical", "SEC-001")] * 9, custom).total == 50
 
 
 def finding(index: int, **overrides: Any) -> ReportFinding:
@@ -105,6 +140,7 @@ def report(count: int = 6, **overrides: Any) -> ReportData:
         "cluster_name": "prod-eu-west",
         "generated_at": datetime(2026, 11, 25, 9, 0, tzinfo=UTC),
         "score": 72,
+        "category_scores": {"security": 40, "rbac": 80},
         "summary": "The cluster has two critical issues that should be fixed this week.",
         "top_risks": [
             "Privileged container: Deployment shop/storefront",
@@ -133,6 +169,7 @@ def test_report_has_every_section_and_no_product_name() -> None:
     assert html.count('class="finding"') == 6
     assert "recurring" in html and "How to fix" in html and "Proposed patch" in html
     assert ">72<" in html  # the score inside the SVG ring
+    assert "40 / 100 &#183; 2 findings" in html and "100 / 100 &#183; 1 finding<" in html
     assert PRODUCT_NAMES.search(html) is None
 
 
@@ -279,12 +316,12 @@ async def test_worker_builds_report_and_api_serves_it(
         await db.close()
 
     row = run_row(admin_db, run_id)
-    # 3 critical + 5 high ... capped at 40 per category; the exact value is pinned on purpose.
     assert (
         row["stats"]["score"]["total"]
         == admin_db.execute("select score from audit_runs where id = %s", (run_id,)).fetchone()[0]
     )  # type: ignore[index]
-    assert 0 <= row["stats"]["score"]["total"] < 60
+    assert 0 < row["stats"]["score"]["total"] < 60
+    assert set(row["stats"]["score"]["categories"]) == set(CATEGORIES)
     assert row["stats"]["report"]["html"] is True and row["stats"]["report"]["pdf"] is True
     assert metrics.registry.get_sample_value("ape_pdf_render_seconds_count") == 1.0
     key = admin_db.execute("select report_key from audit_runs where id = %s", (run_id,)).fetchone()

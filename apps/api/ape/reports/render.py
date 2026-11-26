@@ -38,6 +38,7 @@ class ReportFinding:
     remediation: str | None
     patch: str | None
     recurring: bool
+    platform_component: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +50,7 @@ class ReportData:
     top_risks: list[str]
     findings: list[ReportFinding]
     truncated: bool = False
+    category_scores: dict[str, int] = field(default_factory=dict)
     company_name: str | None = None
     primary_color: str | None = None
     logo: tuple[bytes, str] | None = None  # (bytes, content type)
@@ -97,7 +99,7 @@ def render_html(data: ReportData) -> str:
         severities=SEVERITIES,
         severity_counts=severity_counts,
         score_ring=score_ring(data.score, color),
-        category_bars=category_bars(dict(category_counts), color),
+        category_bars=category_bars(data.category_scores, dict(category_counts), color),
     )
 
 

@@ -1,11 +1,30 @@
-# Score = 100 minus the deductions below. The only place these numbers live.
+# How the audit score is calculated. The only place these numbers live.
+#
+# 1. Every finding has penalty points by severity ([penalty]).
+# 2. Findings of the same rule are counted with diminishing weight ([repeat]): the worst
+#    one counts in full, each further one counts `factor` times the one before. Sixty
+#    deployments with the same gap are one problem to fix, not sixty.
+#    With factor 0.5 a rule can cost at most twice the points of its worst finding.
+# 3. Each category gets its own score from 0 to 100: 100 * half / (half + penalty).
+#    It falls quickly at first and then flattens, so it never drops to zero by volume alone.
+# 4. The total is the average of the category scores, weighted by [category].
 
-[deduction]        # points per finding, by severity
-critical = 15
-high = 8
+[penalty]          # points per finding, by severity
+critical = 25
+high = 10
 medium = 3
 low = 1
 info = 0
 
-[limits]
-max_per_category = 40   # one category can cost at most this many points
+[repeat]
+factor = 0.5       # the n-th finding of the same rule counts factor^(n-1) of its points
+
+[curve]
+half = 20          # penalty points at which a category scores 50
+
+[category]         # share of each category in the total score (any positive numbers)
+security = 30
+rbac = 25
+network = 15
+reliability = 20
+cost = 10
