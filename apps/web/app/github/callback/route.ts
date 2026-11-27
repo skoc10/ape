@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { apiFetch } from "@/lib/api";
+import { publicUrl } from "@/lib/public-url";
 import { listOrganizations, requireSession } from "@/lib/session";
 
 /**
@@ -21,10 +22,10 @@ export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const code = params.get("code");
   const state = params.get("state");
-  if (!state) return NextResponse.redirect(new URL("/github/installed", request.url));
+  if (!state) return NextResponse.redirect(publicUrl("/github/installed", request.url));
 
   await requireSession();
-  const home = new URL("/", request.url);
+  const home = publicUrl("/", request.url);
   if (!code) return NextResponse.redirect(home);
 
   let orgId: string | null = null;
@@ -36,7 +37,7 @@ export async function GET(request: NextRequest) {
   }
   const organization = (await listOrganizations()).find((o) => o.id === orgId);
   if (!organization) return NextResponse.redirect(home);
-  const target = new URL(`/${organization.slug}/settings/github`, request.url);
+  const target = publicUrl(`/${organization.slug}/settings/github`, request.url);
 
   const rawInstallation = params.get("installation_id");
   if (rawInstallation !== null) {
