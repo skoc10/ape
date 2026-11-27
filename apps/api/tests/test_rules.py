@@ -294,6 +294,68 @@ def test_platform_components_are_reported_low_and_labelled() -> None:
     assert all("platformComponent" not in f.evidence for f in others if f.rule_id != "SEC-002")
 
 
+def test_a_platform_name_does_not_hide_access_the_customer_handed_out() -> None:
+    everything = [{"apiGroups": ["*"], "resources": ["*"], "verbs": ["*"]}]
+
+    def account(namespace: str, name: str) -> dict[str, str]:
+        return {"kind": "ServiceAccount", "namespace": namespace, "name": name}
+
+    debug = deployment(pod={"hostPID": True})
+    debug["metadata"]["name"] = "aws-cli-debug"
+    found = run_rules(
+        [
+            # cluster-admin for a pipeline, a group and a person: the customer's own
+            # decisions, whatever the binding is called.
+            binding("azure-devops-deployer", "cluster-admin", [account("ci", "deployer")]),
+            binding("azure-devops", "cluster-admin", [account("ci", "azure-devops")]),
+            binding("aws-developers", "cluster-admin", [{"kind": "Group", "name": "developers"}]),
+            binding("grafana-admin", "cluster-admin", [{"kind": "User", "name": "intern"}]),
+            # One foreign subject is enough.
+            binding(
+                "argocd-everyone",
+                "cluster-admin",
+                [account("argocd", "argocd-server"), {"kind": "Group", "name": "everyone"}],
+            ),
+            # Provider prefixes only count for cluster-scoped objects and provider namespaces.
+            role("Role", "gke-team", everything, "shop"),
+            debug,
+            # Still by design: the component's own service account, or a system namespace.
+            binding(
+                "argocd-application-controller",
+                "cluster-admin",
+                [account("argocd", "argocd-application-controller")],
+            ),
+            binding("velero-server", "cluster-admin", [account("velero", "server")]),
+            binding("aks-service-binding", "cluster-admin", [account("kube-system", "aks-svc")]),
+            binding(
+                "aks-cluster-admin-binding-aad", "cluster-admin", [{"kind": "Group", "name": "g"}]
+            ),
+        ]
+    )
+    component = {
+        str(f.resource): f.evidence.get("platformComponent")
+        for f in found
+        if f.rule_id in {"RBAC-001", "RBAC-002", "SEC-002"}
+    }
+    assert component == {
+        "ClusterRoleBinding/-/azure-devops-deployer": None,
+        "ClusterRoleBinding/-/azure-devops": None,
+        "ClusterRoleBinding/-/aws-developers": None,
+        "ClusterRoleBinding/-/grafana-admin": None,
+        "ClusterRoleBinding/-/argocd-everyone": None,
+        "Role/shop/gke-team": None,
+        "Deployment/shop/aws-cli-debug": None,
+        "ClusterRoleBinding/-/argocd-application-controller": "Argo CD",
+        "ClusterRoleBinding/-/velero-server": "Velero",
+        "ClusterRoleBinding/-/aks-service-binding": "Azure Kubernetes Service",
+        "ClusterRoleBinding/-/aks-cluster-admin-binding-aad": "Azure Kubernetes Service",
+    }
+    severity = {str(f.resource): f.severity for f in found if f.rule_id == "RBAC-002"}
+    assert severity["ClusterRoleBinding/-/azure-devops-deployer"] == "critical"
+    assert severity["ClusterRoleBinding/-/aws-developers"] == "critical"
+    assert severity["ClusterRoleBinding/-/argocd-application-controller"] == "low"
+
+
 # --- network -----------------------------------------------------------------------
 
 

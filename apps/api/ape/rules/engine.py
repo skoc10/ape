@@ -33,7 +33,7 @@ def _finding(
     severity: Severity | None = None,
 ) -> Finding:
     info = RULES[rule_id]
-    component = platform_component(rule_id, resource)
+    component = platform_component(rule_id, resource, evidence)
     if component is not None:
         # Expected for this component: kept in the report, but not as a top risk.
         severity = "low"

@@ -5,10 +5,21 @@ exporter cannot work without access to the host. Reporting these next to the cus
 own mistakes buries the findings somebody can act on. They are still reported, because
 the access is real, but rated low and labelled with the component they belong to.
 
-The match is on the object's name only. That is a convention, not a proof: an object that
-merely carries one of these names gets the same treatment. This is why such findings are
-never dropped, only rated lower.
+The match starts from the object's name. That is a convention, not a proof, so such
+findings are never dropped, only rated lower, and the name alone is not enough where the
+object itself says who gets the access:
+
+* a cluster-admin binding (RBAC-002) is only rated down when every subject is a service
+  account of the same component, or of a system namespace. A binding that hands
+  cluster-admin to a user, a group or somebody else's service account is the customer's
+  own decision whatever it is called; the few bindings a cloud provider creates for
+  users and groups are listed by their exact name;
+* the cloud providers' prefixes are short and generic ("aws", "azure", "gke"), and what
+  the provider manages is cluster-scoped or lives in its own namespaces. A namespaced
+  object elsewhere that merely starts with such a prefix is a regular finding.
 """
+
+from typing import Any
 
 from ape.rules.model import ResourceRef
 
@@ -56,6 +67,30 @@ _COMPONENTS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Google Kubernetes Engine", ("gke", "gce")),
 )
 
+# Components of the cloud provider itself, as opposed to software the customer installs.
+_PROVIDERS = frozenset({"Azure Kubernetes Service", "Amazon EKS", "Google Kubernetes Engine"})
+
+# Namespaces a provider (or Kubernetes) manages. Extend it when a provider adds one.
+_PROVIDER_NAMESPACES = frozenset(
+    {
+        "kube-system",
+        "kube-public",
+        "kube-node-lease",
+        "gatekeeper-system",
+        "calico-system",
+        "tigera-operator",
+        "gke-managed-system",
+        "gke-gmp-system",
+        "gmp-system",
+        "amazon-cloudwatch",
+        "amazon-guardduty",
+        "app-routing-system",
+    }
+)
+
+# cluster-admin bindings to users or groups that a provider creates on every cluster.
+_PROVIDER_ADMIN_BINDINGS = frozenset({"aks-cluster-admin-binding", "aks-cluster-admin-binding-aad"})
+
 _SEPARATORS = ("-", ":", ".", "_")
 
 
@@ -63,12 +98,43 @@ def _has_prefix(name: str, prefix: str) -> bool:
     return name == prefix or any(name.startswith(prefix + s) for s in _SEPARATORS)
 
 
-def platform_component(rule_id: str, resource: ResourceRef) -> str | None:
-    """The component a by-design finding belongs to, or None for a regular finding."""
+def _subject_of_component(subject: Any, component: str, prefixes: tuple[str, ...]) -> bool:
+    """True for a service account that is part of the component the binding is named after."""
+    if not isinstance(subject, dict) or subject.get("kind") != "ServiceAccount":
+        return False
+    namespace = str(subject.get("namespace") or "").lower()
+    if namespace in _PROVIDER_NAMESPACES:
+        return True
+    if component in _PROVIDERS:
+        return False
+    name = str(subject.get("name") or "").lower()
+    return any(_has_prefix(name, p) or _has_prefix(namespace, p) for p in prefixes)
+
+
+def platform_component(
+    rule_id: str, resource: ResourceRef, evidence: dict[str, Any] | None = None
+) -> str | None:
+    """The component a by-design finding belongs to, or None for a regular finding.
+
+    ``evidence`` is the finding's evidence; for RBAC-002 it carries the binding's subjects.
+    """
     if rule_id not in BY_DESIGN_RULES:
         return None
     name = resource.name.lower()
     for component, prefixes in _COMPONENTS:
-        if any(_has_prefix(name, prefix) for prefix in prefixes):
-            return component
+        if not any(_has_prefix(name, prefix) for prefix in prefixes):
+            continue
+        if (
+            component in _PROVIDERS
+            and resource.namespace is not None
+            and resource.namespace not in _PROVIDER_NAMESPACES
+        ):
+            return None
+        if rule_id == "RBAC-002" and name not in _PROVIDER_ADMIN_BINDINGS:
+            subjects = (evidence or {}).get("subjects")
+            if not isinstance(subjects, list) or not subjects:
+                return None
+            if not all(_subject_of_component(s, component, prefixes) for s in subjects):
+                return None
+        return component
     return None

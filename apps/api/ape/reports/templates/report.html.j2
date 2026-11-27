@@ -100,7 +100,7 @@
     <h3>{{ f.title }}</h3>
     <p class="resource">{{ f.resource }}</p>
     {% if f.explanation %}<p class="text">{{ f.explanation }}</p>{% endif %}
-    {% if f.platform_component %}<p class="muted">This object belongs to {{ f.platform_component }}, which needs this access to work. It is listed for completeness and rated low; review it only if you did not install {{ f.platform_component }} yourself.</p>{% endif %}
+    {% if f.platform_component %}<p class="muted">By its name this object belongs to {{ f.platform_component }}, which needs this access to work. It is listed for completeness and rated low; review it if you did not install {{ f.platform_component }} yourself or do not recognise the object.</p>{% endif %}
     {% if f.remediation %}<p><strong>How to fix</strong></p><p class="text">{{ f.remediation }}</p>{% endif %}
     {% if f.patch %}<p><strong>Proposed patch</strong></p><pre>{{ f.patch }}</pre>{% endif %}
   </section>
