@@ -31,13 +31,18 @@ export type GitHubStatus = {
   repo: string | null;
   manifest_path: string | null;
   install_url: string | null;
+  /** For an owner of the customer's GitHub account: installs the App, connects nothing. */
+  owner_install_url: string | null;
+  /** GitHub sign-in that connects an installation which already exists. */
+  connect_url: string | null;
   can_manage: boolean;
 };
 
 export type GitHubRepo = { full_name: string; default_branch: string; private: boolean };
 
-export async function getGitHubStatus(orgId: string): Promise<GitHubStatus> {
-  const res = await apiFetch(orgId, "/v1/settings/github");
+/** `pick` makes `connect_url` come back with that installation chosen. */
+export async function getGitHubStatus(orgId: string, pick?: number): Promise<GitHubStatus> {
+  const res = await apiFetch(orgId, pick ? `/v1/settings/github?pick=${pick}` : "/v1/settings/github");
   if (!res.ok) throw new Error(`API error ${res.status}`);
   return res.json();
 }
