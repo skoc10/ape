@@ -502,6 +502,69 @@ def test_ambiguous_or_unsafe_values_files_are_left_alone() -> None:
     assert plan(sources, [ROWS[2]]).result.files == {}
 
 
+def test_a_fitting_file_name_is_no_evidence_when_the_values_are_known_to_be_elsewhere() -> None:
+    cert_manager = [ROWS[2]]
+    named = {"x/cert-manager/values.yaml": "replicaCount: 1\n"}
+    assert plan(named, cert_manager).result.files != {}  # the name alone, nothing against it
+
+    def reason(sources: dict[str, str]) -> str:
+        result = plan(sources, cert_manager).result
+        assert result.files == {}
+        return result.manual[0].reason
+
+    # The Application reads its values from a path that is not in this repository. A bare
+    # values.yaml at the root shares nothing with it but the file name.
+    elsewhere = CERT_MANAGER_APP.replace("platform/gitops/addons", "envs/prod")
+    other_chart = {"values.yaml": "replicaCount: 2\n", "Chart.yaml": "name: shop\n"}
+    assert "was not found in this repository" in reason({"apps/cm.yaml": elsewhere, **other_chart})
+    assert "was not found in this repository" in reason({"apps/cm.yaml": elsewhere, **named})
+    # A path without "$ref/" is read from inside the chart package, and ".." leaves the source.
+    for entry in ("cert-manager/values.yaml", "$values/../x/cert-manager/values.yaml"):
+        inside = CERT_MANAGER_APP.replace(
+            "$values/platform/gitops/addons/cert-manager/values.yaml", entry
+        )
+        assert "was not found in this repository" in reason({"apps/cm.yaml": inside, **named})
+    # Two value files, one of them with a fitting name: still not ours to pick.
+    two_files = CERT_MANAGER_APP.replace(
+        "          - $values/platform/gitops/addons/cert-manager/values.yaml\n",
+        "          - $values/x/cert-manager/values.yaml\n          - $values/x/prod.yaml\n",
+    )
+    assert "exactly one file" in reason({"apps/cm.yaml": two_files, **named, "x/prod.yaml": "a: 1"})
+    # A HelmRelease that takes its values from a ConfigMap.
+    flux = """\
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata: {name: cert-manager, namespace: cert-manager}
+spec:
+  chart: {spec: {chart: cert-manager}}
+  valuesFrom: [{kind: ConfigMap, name: v}]
+"""
+    assert "does not keep its values inline" in reason({"clusters/cm.yaml": flux, **named})
+
+
+def test_the_values_file_of_a_wrapper_chart_is_not_written_at_the_top_level() -> None:
+    cert_manager = [ROWS[2]]
+    values = {"x/cert-manager/values.yaml": "cert-manager:\n  replicaCount: 1\n"}
+
+    def chart(text: str) -> Any:
+        return plan({**values, "x/cert-manager/Chart.yaml": text}, cert_manager).result
+
+    # The chart passes these values on to its dependency, below the dependency's name.
+    wrapper = chart(
+        "apiVersion: v2\nname: cert-manager\nversion: 0.1.0\n"
+        "dependencies:\n  - name: cert-manager\n    version: v1.18.2\n"
+    )
+    assert wrapper.files == {} and "belongs to another chart" in wrapper.manual[0].reason
+    aliased = chart(
+        "name: platform-certs\ndependencies:\n  - {name: upstream, alias: cert-manager}\n"
+    )
+    assert aliased.files == {}
+    assert chart("name: something-else\nversion: 1.0.0\n").files == {}
+    assert chart("name: [not, a, chart\n").files == {}
+    # A copy of the chart itself kept in the repository: its own values file.
+    assert chart("apiVersion: v2\nname: cert-manager\nversion: v1.18.2\n").files != {}
+
+
 def test_a_dependency_chart_needs_proof_of_its_parent() -> None:
     node_exporter = [ROWS[1]]
     # Named after the release, and the file shows the parent's layout.
