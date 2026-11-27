@@ -16,6 +16,7 @@ from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap
 from ruamel.yaml.error import YAMLError
 
+from ape.github import helm
 from ape.github.patcher import PatchRequest, Target, merge_patch
 from ape.github.pull_request import cell, requests_from_findings
 from ape.sanitize import contains_placeholder
@@ -51,9 +52,18 @@ class BundleFile:
 
 
 @dataclass(slots=True)
+class HelmValuesFile:
+    path: str
+    release: helm.Release
+    description: str
+    requests: list[PatchRequest]
+
+
+@dataclass(slots=True)
 class FixBundle:
     archive: bytes
     files: list[BundleFile] = field(default_factory=list)
+    helm_values: list[HelmValuesFile] = field(default_factory=list)
     manual: list[tuple[PatchRequest, str]] = field(default_factory=list)
 
 
@@ -110,7 +120,11 @@ def _document(target: Target, patches: list[CommentedMap]) -> CommentedMap:
 
 
 def _readme(
-    cluster_name: str, date: str, files: list[BundleFile], manual: list[tuple[PatchRequest, str]]
+    cluster_name: str,
+    date: str,
+    files: list[BundleFile],
+    manual: list[tuple[PatchRequest, str]],
+    helm_files: list[HelmValuesFile] | None = None,
 ) -> str:
     lines = [
         f"# Kubernetes audit fixes for {cell(cluster_name)} ({date})",
@@ -145,6 +159,23 @@ def _readme(
             found = "; ".join(f"{cell(r.rule_id)} {cell(r.title)}" for r in f.requests)
             lines.append(f"| {cell(f.path)} | {cell(str(f.target))} | {found} |")
         lines.append("")
+    if helm_files:
+        lines += [
+            "## Helm releases",
+            "",
+            "These resources are rendered by a Helm chart, so a patch of the resource cannot "
+            "be committed for them. Each file below holds the same fixes as chart values. "
+            "Only fixes whose value key was verified against the chart are included.",
+            "",
+            "| File | Release | Chart and keys | Findings |",
+            "| --- | --- | --- | --- |",
+        ]
+        for h in helm_files:
+            found = "; ".join(f"{cell(r.rule_id)} {cell(r.title)}" for r in h.requests)
+            lines.append(
+                f"| {cell(h.path)} | {cell(h.release.instance)} | {cell(h.description)} | {found} |"
+            )
+        lines.append("")
     if manual:
         lines += [
             "## Not included",
@@ -161,8 +192,78 @@ def _readme(
     return "\n".join(lines)
 
 
+def _helm_values(
+    grouped: dict[Target, list[tuple[PatchRequest, CommentedMap]]],
+    objects: dict[tuple[str, str | None, str], dict[str, Any]],
+    taken: set[str],
+) -> tuple[list[HelmValuesFile], dict[str, str]]:
+    """One values overlay per Helm release, for the patches that have verified value keys.
+
+    A strategic merge patch cannot be applied to a chart; these files can be passed to
+    ``helm upgrade -f`` or copied into the release's own values file.
+    """
+    overlays: dict[tuple[str | None, str], dict[str, Any]] = {}
+    described: dict[tuple[str | None, str], tuple[helm.Release, list[str], list[PatchRequest]]] = {}
+    for target, entries in grouped.items():
+        obj = objects.get((target.kind, target.namespace, target.name))
+        for request, _ in entries:
+            translated = helm.translation_for(obj, request.patch)
+            if not isinstance(translated, helm.Translation):
+                continue
+            known, parent = helm.standalone_parent(translated.release)
+            if not known:
+                continue
+            key = (translated.release.namespace, translated.release.instance)
+            _deep_update(overlays.setdefault(key, {}), translated.overlay(parent))
+            release, notes, requests = described.setdefault(key, (translated.release, [], []))
+            notes.append(translated.describe(parent))
+            requests.append(request)
+
+    files: list[HelmValuesFile] = []
+    contents: dict[str, str] = {}
+    for key in sorted(overlays, key=lambda k: (k[0] or "", k[1])):
+        release, notes, requests = described[key]
+        base = f"helm-values/{_slug(key[0] or 'cluster')}-{_slug(key[1])}"
+        path, counter = f"{base}.yaml", 2
+        while path in taken:
+            path, counter = f"{base}-{counter}.yaml", counter + 1
+        taken.add(path)
+        header = (
+            f"# Values for Helm release {_comment(release.instance)}"
+            f" in namespace {_comment(release.namespace or '-')}.\n"
+            "# Pass this file with -f after the release's own values, or copy the keys into them.\n"
+        )
+        contents[path] = header + _safe_yaml(overlays[key])
+        files.append(HelmValuesFile(path, release, "; ".join(dict.fromkeys(notes)), requests))
+    return files, contents
+
+
+def _comment(text: str) -> str:
+    """Text inside a YAML comment: one line, nothing that could end the comment."""
+    return " ".join(str(text).split())[:120]
+
+
+def _safe_yaml(data: dict[str, Any]) -> str:
+    import yaml as pyyaml
+
+    dumped: str = pyyaml.safe_dump(data, sort_keys=False)
+    return dumped
+
+
+def _deep_update(target: dict[str, Any], source: dict[str, Any]) -> None:
+    for key, value in source.items():
+        if isinstance(value, dict) and isinstance(target.get(key), dict):
+            _deep_update(target[key], value)
+        else:
+            target[key] = value
+
+
 def build_fix_bundle(
-    rows: list[dict[str, Any]], *, cluster_name: str, now: datetime | None = None
+    rows: list[dict[str, Any]],
+    *,
+    cluster_name: str,
+    now: datetime | None = None,
+    objects: dict[tuple[str, str | None, str], dict[str, Any]] | None = None,
 ) -> FixBundle:
     """``rows`` are the findings of one audit. Findings without a patch are skipped."""
     now = now or datetime.now(UTC)
@@ -195,8 +296,13 @@ def build_fix_bundle(
         contents[path] = buffer.getvalue()
         files.append(BundleFile(path, target, [request for request, _ in entries]))
 
+    helm_files, helm_contents = _helm_values(grouped, objects or {}, taken)
     date = now.strftime("%Y-%m-%d")
-    members = {"README.md": _readme(cluster_name, date, files, manual), **contents}
+    members = {
+        "README.md": _readme(cluster_name, date, files, manual, helm_files),
+        **contents,
+        **helm_contents,
+    }
     if files:
         example = [
             "# Add these entries to the `patches:` list of your kustomization.yaml.",
@@ -213,4 +319,4 @@ def build_fix_bundle(
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = 0o644 << 16
             bundle.writestr(info, text)
-    return FixBundle(archive.getvalue(), files, manual)
+    return FixBundle(archive.getvalue(), files, helm_files, manual)

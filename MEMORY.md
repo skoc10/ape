@@ -540,6 +540,39 @@ freelancer müşteri reposuna yazabilse de genelde owner değildir. Kararlar:
 - **Sağlayıcı binding'leri** (`aks-cluster-admin-binding`, `-aad`) yalnızca sağlayıcının
   kendi subject'leriyle "tasarım gereği" sayılır.
 
+### Faz 2, 1. adım: Helm farkındalığı (2026-11-27)
+
+Tasarım: `docs/design/helm-awareness.md`. Kod: `apps/api/ape/github/helm.py`.
+
+- **İlke:** values dosyası yalnızca hem dosya hem anahtar için kanıt varsa değişir. Helm
+  bilinmeyen anahtarı sessizce yok saydığı için tahmin yok; LLM'e de sorulmuyor.
+- **Release:** nesnenin etiketlerinden (`helm.sh/chart`, `app.kubernetes.io/instance`,
+  `app.kubernetes.io/component`). Nesneler saklanan maskeli snapshot'tan okunur
+  (`ape/analysis/objects.py`); snapshot yoksa davranış eskisiyle aynıdır.
+- **Values dosyası:** sırayla Argo CD `Application` (tek `valueFiles` girdisi, `$ref/...`
+  biçimi dahil, yol sondan eşleşir), Flux `HelmRelease` (inline `spec.values`), dosya adı
+  kuralı (`<ad>/values.yaml`, `<ad>-values.yaml`, `values-<ad>.yaml`, `values/<ad>.yaml`).
+  Birden fazla aday = dokunma.
+- **Katalog** (her kayıt chart'ın kendi şablonundan okundu, testle sabit): cert-manager
+  controller (1.18.2), argo-cd redis/dex/notifications/server (10.20.0), ingress-nginx
+  controller (4.15.1), opentelemetry-collector (0.183.2), grafana (14.6.1),
+  prometheus-node-exporter (6.0.0); son ikisi kube-prometheus-stack altında da. Major sürüm
+  farklıysa PR'da "key checked against chart version X" yazar.
+- **Çevrilen alanlar:** yalnızca ana container'ın `securityContext` ve `resources`'u, pod'un
+  `securityContext`'i ve `automountServiceAccountToken`. Yamanın herhangi bir parçası
+  çevrilemiyorsa tamamı manuel kalır.
+- **Çıktı:** PR'da values dosyası yerinde düzenlenir ("Helm values: chart, anahtar");
+  Download fixes zip'ine `helm-values/<namespace>-<release>.yaml`; çevrilemeyenler release
+  ve chart adıyla manuel listede.
+- **Plandan sapma:** repodaki chart şablonlarından anahtar çıkarma bu sürümde yok
+  (tasarım belgesinde "Later"). Control Plane chart indirmez, `helm` çalıştırmaz.
+- **Gerçek repodaki beklenti** (17 manuel yamadan): argocd-redis automount ve node-exporter
+  uygulanır; otel-collector için anahtar bilinir ama dosya adı (`otel-collector-values.yaml`)
+  release adıyla eşleşmediği için öneri olarak kalır; probe yamaları, grafana sidecar'ları,
+  kurum içi `volobox` chart'ı ve ApplicationSet ile gelen müşteri namespace'leri manuel.
+- Backlog: doğrulamalı mod (izole `helm template`), ApplicationSet, helmfile, repodaki
+  chart şablonlarından anahtar, katalog genişletme.
+
 ## Kullanıcı Aksiyonu Gerekenler
 
 - **`ape-secrets` yedeği (4.6).** `kubectl -n ape get secret ape-secrets -o yaml` çıktısı güvenli bir

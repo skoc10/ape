@@ -8,6 +8,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
+from ape.analysis.objects import load_object_index
 from ape.core.db import Database
 from ape.core.deps import CurrentPrincipal
 from ape.core.tenancy import Principal
@@ -371,6 +372,9 @@ async def open_pull_request(
             cluster_name=str(cluster["name"]) if cluster else "cluster",
             summary=str((run["stats"] or {}).get("summary") or ""),
             score=run["score"],
+            objects=await load_object_index(
+                request.app.state.object_store, principal.org_id, run_id
+            ),
         )
         if not plan.result.files:
             raise HTTPException(status.HTTP_409_CONFLICT, _no_match_message(plan, sources, config))

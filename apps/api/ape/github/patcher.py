@@ -23,7 +23,7 @@ from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from ruamel.yaml.error import YAMLError
 
-MatchRule = Literal["exact", "kustomize_namespace", "kind_name"]
+MatchRule = Literal["exact", "kustomize_namespace", "kind_name", "helm_values"]
 
 # Lists whose items are merged by this key instead of being replaced wholesale, as in
 # Kubernetes strategic merge patches.
@@ -64,6 +64,7 @@ class Applied:
     request: PatchRequest
     path: str
     rule: MatchRule
+    detail: str = ""  # for Helm values: the chart and the keys that were set
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,6 +247,21 @@ def _match(target: Target, documents: list[_Document]) -> tuple[_Document, Match
     if len(candidates) > 1:
         return f"ambiguous: {len(candidates)} manifests match by kind and name"
     return "manifests with this kind and name belong to a different namespace"
+
+
+def merge_into_document(text: str, path: str, index: int, overlay: dict[str, Any]) -> str | None:
+    """Merges ``overlay`` into one YAML document of a file and returns the new text, with
+    comments, order and indentation kept. None when the file cannot be edited safely."""
+    if len(text.encode()) > MAX_FILE_BYTES:
+        return None
+    file = _load_file(path, text)
+    if file is None or index >= len(file.documents):
+        return None
+    document = file.documents[index]
+    if not isinstance(document, CommentedMap):
+        return None
+    merge_patch(document, overlay)
+    return _dump_file(file)
 
 
 def apply_patches(sources: dict[str, str], requests: list[PatchRequest]) -> PatchResult:

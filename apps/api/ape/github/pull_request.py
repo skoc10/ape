@@ -1,17 +1,32 @@
 """Builds the pull request for one audit: which patches apply, the commit, the description."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
-from ape.github.patcher import Applied, Manual, PatchRequest, PatchResult, Target, apply_patches
+import yaml
+
+from ape.github import helm
+from ape.github.patcher import (
+    Applied,
+    Manual,
+    PatchRequest,
+    PatchResult,
+    Target,
+    apply_patches,
+    merge_into_document,
+)
 from ape.sanitize import contains_placeholder
 
 _RULE_LABEL = {
     "exact": "exact match (kind, namespace, name)",
     "kustomize_namespace": "namespace taken from kustomization.yaml",
     "kind_name": "fallback: matched by kind and name",
+    "helm_values": "Helm values",
 }
+
+ObjectIndex = dict[tuple[str, str | None, str], dict[str, Any]]
+_NO_MANIFEST = "no manifest for this resource"
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,7 +82,7 @@ def _applied_table(applied: list[Applied]) -> list[str]:
     for a in applied:
         lines.append(
             f"| {cell(a.request.rule_id)} {cell(a.request.title)} | {cell(str(a.request.target))} "
-            f"| {cell(a.path)} | {_RULE_LABEL[a.rule]} |"
+            f"| {cell(a.path)} | {_RULE_LABEL[a.rule]}{': ' + cell(a.detail) if a.detail else ''} |"
         )
     return lines
 
@@ -91,6 +106,69 @@ def _manual_section(manual: list[Manual]) -> list[str]:
     return lines
 
 
+def apply_helm_values(sources: dict[str, str], result: PatchResult, objects: ObjectIndex) -> None:
+    """Second pass over the patches that found no manifest: resources rendered by a Helm
+    chart are fixed in the release's values file, when both the file and the key are known.
+
+    Patches that could be translated but have no file here stay manual, shown as the values
+    to set instead of a patch nobody can apply to a chart.
+    """
+    still_manual: list[Manual] = []
+    for manual in result.manual:
+        request = manual.request
+        if not manual.reason.startswith(_NO_MANIFEST):
+            still_manual.append(manual)
+            continue
+        target = request.target
+        translated = helm.translation_for(
+            objects.get((target.kind, target.namespace, target.name)), request.patch
+        )
+        if translated is None:
+            still_manual.append(manual)
+            continue
+        if isinstance(translated, str):
+            still_manual.append(Manual(request, translated))
+            continue
+        release = translated.release
+        found = helm.find_values(release, sources)
+        if isinstance(found, str):
+            known, parent = helm.standalone_parent(release)
+            if not known:
+                still_manual.append(Manual(request, f"rendered by {release}; {found}"))
+                continue
+            suggestion = yaml.safe_dump(translated.overlay(parent), sort_keys=False)
+            still_manual.append(
+                Manual(
+                    replace(request, patch=suggestion),
+                    f"rendered by {release}; {found}. Set these values for the release "
+                    f"({translated.describe(parent)})",
+                )
+            )
+            continue
+        overlay = translated.overlay(found.parent, found.prefix)
+        current = result.files.get(found.path, sources[found.path])
+        document = list(yaml.safe_load_all(current))[found.document]
+        problem = helm.conflict(document, overlay)
+        updated = (
+            None if problem else merge_into_document(current, found.path, found.document, overlay)
+        )
+        if updated is None:
+            reason = problem or "its values file cannot be edited safely"
+            still_manual.append(Manual(request, f"rendered by {release}; {reason}"))
+            continue
+        if updated != current:
+            result.files[found.path] = updated
+        result.applied.append(
+            Applied(
+                request,
+                found.path,
+                "helm_values",
+                f"{translated.describe(found.parent)} (file found by {found.found_by})",
+            )
+        )
+    result.manual[:] = still_manual
+
+
 def plan_pull_request(
     sources: dict[str, str],
     rows: list[dict[str, Any]],
@@ -99,6 +177,7 @@ def plan_pull_request(
     summary: str,
     score: int | None,
     now: datetime | None = None,
+    objects: ObjectIndex | None = None,
 ) -> PullRequestPlan:
     now = now or datetime.now(UTC)
     # Checked again here, not only when the finding was written: a "<secret:...>" placeholder
@@ -106,6 +185,8 @@ def plan_pull_request(
     requests = requests_from_findings(rows)
     masked = [r for r in requests if contains_placeholder(r.patch)]
     result = apply_patches(sources, [r for r in requests if not contains_placeholder(r.patch)])
+    if objects:
+        apply_helm_values(sources, result, objects)
     result.manual += [Manual(r, "the patch contains a masked value") for r in masked]
     date = now.strftime("%Y-%m-%d")
     title = f"Kubernetes audit fixes for {cell(cluster_name)} ({date})"
