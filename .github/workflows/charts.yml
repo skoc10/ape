@@ -63,6 +63,9 @@ jobs:
           ! echo "$out" | grep -q 'S3_BACKUP_ACCESS_KEY$'
           # Only the report bucket is routed on the public file host.
           $base --set s3.publicHost=files.example.test | grep -q 'path: /reports/'
+          # The storage pod accepts connections on its S3 port only.
+          $base | grep -A12 'kind: NetworkPolicy' | grep -q 'port: 8333'
+          test "$($base | grep -c 'kind: NetworkPolicy')" = "1"
 
   # Installs the agent chart on kind and proves the ServiceAccount is read-only.
   agent-install:
@@ -187,6 +190,23 @@ jobs:
                   raise SystemExit("the app identity reached something it must not")
           print("app identity: own buckets ok, backups and bucket creation denied")
           '
+      - name: The storage ports that take no credentials are closed to other pods
+        run: |
+          ip=$(kubectl -n ape get pod ape-s3-0 -o jsonpath='{.status.podIP}')
+          kubectl -n ape exec deploy/ape-api -- python -c "
+          import socket, sys
+          def reaches(port):
+              try:
+                  socket.create_connection(('$ip', port), timeout=4).close()
+                  return True
+              except OSError:
+                  return False
+          assert reaches(8333), 'the S3 port has to stay reachable'
+          # filer, master, volume, and the filer's gRPC port (IAM without authentication)
+          opened = [port for port in (8888, 9333, 9340, 18888) if reaches(port)]
+          assert not opened, f'reachable without credentials: {opened}'
+          print('storage: only the S3 port answers')
+          "
       - name: Diagnostics
         if: failure()
         run: |
