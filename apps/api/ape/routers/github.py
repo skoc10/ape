@@ -5,7 +5,7 @@ from typing import Annotated, Any
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
 from ape.core.db import Database
@@ -56,15 +56,29 @@ class GitHubStatus(BaseModel):
     repo: str | None
     manifest_path: str | None
     install_url: str | None
+    # For somebody who may install apps on the customer's account but has no account
+    # here: installs the App, connects nothing.
+    owner_install_url: str | None = None
+    # GitHub sign-in that connects an installation which already exists.
+    connect_url: str | None = None
     can_manage: bool
 
 
-def _status(github: GitHubApp, row: dict[str, Any], principal: Principal) -> GitHubStatus:
+def _status(
+    github: GitHubApp, row: dict[str, Any], principal: Principal, *, pick: int | None = None
+) -> GitHubStatus:
     can_manage = principal.role in MANAGER_ROLES
-    install_url = None
+    install_url = owner_install_url = connect_url = None
     if github.configured and can_manage:
-        install_url = github.install_url(
-            github.new_state(org_id=principal.org_id, user_id=principal.user_id)
+        state = github.new_state(org_id=principal.org_id, user_id=principal.user_id)
+        install_url = github.install_url(state)
+        owner_install_url = github.owner_install_url()
+        connect_url = github.authorize_url(
+            github.new_state(
+                org_id=principal.org_id, user_id=principal.user_id, installation_id=pick
+            )
+            if pick is not None
+            else state
         )
     return GitHubStatus(
         configured=github.configured,
@@ -72,15 +86,24 @@ def _status(github: GitHubApp, row: dict[str, Any], principal: Principal) -> Git
         repo=row["github_repo"],
         manifest_path=row["manifest_path"],
         install_url=install_url,
+        owner_install_url=owner_install_url,
+        connect_url=connect_url,
         can_manage=can_manage,
     )
 
 
 @router.get("/settings/github")
-async def github_status(principal: CurrentPrincipal, db: Db, github: GitHub) -> GitHubStatus:
+async def github_status(
+    principal: CurrentPrincipal,
+    db: Db,
+    github: GitHub,
+    pick: Annotated[int | None, Query(gt=0)] = None,
+) -> GitHubStatus:
+    """``pick`` makes ``connect_url`` come back with that installation chosen. It is only a
+    preference: the sign-in still has to show that the GitHub user can push there."""
     async with db.tenant(principal.org_id) as tc:
         row = await org_settings.get(tc)
-    return _status(github, row, principal)
+    return _status(github, row, principal, pick=pick)
 
 
 class InstallationIn(BaseModel):
@@ -118,6 +141,77 @@ async def connect_installation(
         )
     log.info("github_connected")
     return _status(github, row, principal)
+
+
+class AuthorizationIn(BaseModel):
+    code: str = Field(min_length=1, max_length=200)
+    state: str = Field(min_length=1, max_length=2000)
+
+
+class InstallationChoice(BaseModel):
+    installation_id: int
+    account: str
+
+
+class AuthorizationOut(BaseModel):
+    status: GitHubStatus
+    # Filled when the GitHub account reaches several installations and none was picked yet.
+    choices: list[InstallationChoice] = []
+
+
+@router.post("/settings/github/authorization")
+async def connect_by_authorization(
+    body: AuthorizationIn, principal: CurrentPrincipal, db: Db, github: GitHub
+) -> AuthorizationOut:
+    """Called when the user returns from a GitHub sign-in without installing anything:
+    connects an installation that somebody else made, typically the customer's owner.
+
+    Nothing from the request names the installation. The candidates are the installations
+    the signed-in GitHub user can push to, as GitHub reports them; if there are several,
+    the pick travels in the signed state of a second sign-in.
+    """
+    _require_manager(principal)
+    if not github.configured:
+        raise _upstream(
+            GitHubNotConfigured("the GitHub App is not configured on this installation")
+        )
+    if not github.check_state(body.state, org_id=principal.org_id, user_id=principal.user_id):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "the GitHub sign-in expired; start again")
+    try:
+        candidates = await github.user_installations(body.code)
+    except GitHubError as exc:
+        raise _upstream(exc) from None
+    if candidates is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "the GitHub sign-in could not be verified")
+    if not candidates:
+        log.warning("github_authorization_without_installation")
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "the GitHub App is not installed on a repository you can push to",
+        )
+    picked = github.state_installation(body.state)
+    if picked is None and len(candidates) > 1:
+        async with db.tenant(principal.org_id) as tc:
+            row = await org_settings.get(tc)
+        return AuthorizationOut(
+            status=_status(github, row, principal),
+            choices=[
+                InstallationChoice(installation_id=c.id, account=c.account) for c in candidates
+            ],
+        )
+    chosen = next((c for c in candidates if picked is None or c.id == picked), None)
+    if chosen is None:
+        # The picked installation is not (or no longer) one this GitHub user can push to.
+        log.warning("github_installation_rejected")
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "this GitHub installation does not belong to you"
+        )
+    async with db.tenant(principal.org_id) as tc:
+        row = await org_settings.set_github_installation(
+            tc, installation_id=chosen.id, allowed_repos=chosen.writable_repos
+        )
+    log.info("github_connected", via="authorization")
+    return AuthorizationOut(status=_status(github, row, principal))
 
 
 @router.delete("/settings/github")

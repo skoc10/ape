@@ -30,6 +30,19 @@ class GitHubNotConfigured(GitHubError):
 
 
 @dataclass(frozen=True, slots=True)
+class UserInstallation:
+    """An installation of the App as one GitHub user sees it."""
+
+    id: int
+    account: str  # login of the account or organisation the App is installed on
+    writable_repos: list[str]
+
+
+# A person rarely works with more accounts than this; it bounds the calls of one sign-in.
+_MAX_INSTALLATIONS = 20
+
+
+@dataclass(frozen=True, slots=True)
 class Repo:
     full_name: str
     default_branch: str
@@ -57,15 +70,32 @@ class GitHubApp:
             b"ape-github-state:" + self._settings.github_app_client_secret.encode()
         ).digest()
 
-    def new_state(self, *, org_id: str, user_id: str) -> str:
-        """Signed, short-lived value that ties the GitHub round trip to one user and tenant."""
+    def new_state(self, *, org_id: str, user_id: str, installation_id: int | None = None) -> str:
+        """Signed, short-lived value that ties the GitHub round trip to one user and tenant.
+
+        ``installation_id`` records which installation the user picked when their GitHub
+        account can reach more than one.
+        """
         self._require()
         now = int(time.time())
-        return jwt.encode(
-            {"org": org_id, "sub": user_id, "iat": now, "exp": now + _STATE_TTL_SECONDS},
-            self._state_key(),
-            algorithm="HS256",
-        )
+        claims: dict[str, Any] = {
+            "org": org_id,
+            "sub": user_id,
+            "iat": now,
+            "exp": now + _STATE_TTL_SECONDS,
+        }
+        if installation_id is not None:
+            claims["inst"] = installation_id
+        return jwt.encode(claims, self._state_key(), algorithm="HS256")
+
+    def state_installation(self, state: str) -> int | None:
+        """The installation picked in a state that ``check_state`` has already accepted."""
+        try:
+            claims = jwt.decode(state, self._state_key(), algorithms=["HS256"])
+        except jwt.PyJWTError:
+            return None
+        value = claims.get("inst")
+        return value if isinstance(value, int) and value > 0 else None
 
     def check_state(self, state: str, *, org_id: str, user_id: str) -> bool:
         try:
@@ -83,6 +113,22 @@ class GitHubApp:
         base = self._settings.github_web_url.rstrip("/")
         return f"{base}/apps/{self._settings.github_app_slug}/installations/new?state={state}"
 
+    def owner_install_url(self) -> str:
+        """A link to hand to whoever may install apps on the customer's account, usually an
+        organisation owner without an account here. It carries no state: installing gives
+        this workspace nothing until somebody connects with their own GitHub sign-in."""
+        self._require()
+        base = self._settings.github_web_url.rstrip("/")
+        return f"{base}/apps/{self._settings.github_app_slug}/installations/new"
+
+    def authorize_url(self, state: str) -> str:
+        """GitHub sign-in without installing anything, for connecting an installation that
+        somebody else made."""
+        self._require()
+        base = self._settings.github_web_url.rstrip("/")
+        client_id = self._settings.github_app_client_id
+        return f"{base}/login/oauth/authorize?client_id={client_id}&state={state}"
+
     async def user_writable_repos(self, code: str, installation_id: int) -> list[str] | None:
         """The repositories of the installation that the person who came back from GitHub
         can push to, or None when that person cannot see the installation at all.
@@ -96,6 +142,36 @@ class GitHubApp:
         all of them. So the answer is the list of repositories this person could have
         pushed to themselves; the workspace is limited to it.
         """
+        headers = await self._user_headers(code)
+        if headers is None:
+            return None
+        if not any(i == installation_id for i, _ in await self._user_installations(headers)):
+            return None
+        return await self._writable_repos(headers, installation_id)
+
+    async def user_installations(self, code: str) -> list[UserInstallation] | None:
+        """Every installation of the App in which the person who came back from GitHub can
+        push to at least one repository, or None when the sign-in is not valid.
+
+        This is how an installation made by somebody else (the customer's organisation
+        owner) is connected: the same rule as above decides, the person's own push access.
+        The user token is used for these calls only and is never stored.
+        """
+        headers = await self._user_headers(code)
+        if headers is None:
+            return None
+        found: list[UserInstallation] = []
+        for installation_id, account in (await self._user_installations(headers))[
+            :_MAX_INSTALLATIONS
+        ]:
+            writable = await self._writable_repos(headers, installation_id)
+            if writable:
+                found.append(UserInstallation(installation_id, account, writable))
+        return found
+
+    async def _user_headers(self, code: str) -> dict[str, str] | None:
+        """Exchanges the one-time code for a user token. The token lives only in the
+        returned headers, for the duration of one request."""
         self._require()
         response = await self._http.post(
             f"{self._settings.github_web_url.rstrip('/')}/login/oauth/access_token",
@@ -109,13 +185,15 @@ class GitHubApp:
         token = response.json().get("access_token") if response.status_code == 200 else None
         if not isinstance(token, str) or not token:
             return None
-        headers = {
+        return {
             "Authorization": f"Bearer {token}",
             "Accept": _ACCEPT,
             "X-GitHub-Api-Version": _API_VERSION,
         }
-        if not await self._user_sees_installation(headers, installation_id):
-            return None
+
+    async def _writable_repos(
+        self, headers: dict[str, str], installation_id: int
+    ) -> list[str] | None:
         writable: list[str] = []
         for page in range(1, 11):
             listing = await self._http.get(
@@ -135,7 +213,9 @@ class GitHubApp:
                 break
         return sorted(writable)
 
-    async def _user_sees_installation(self, headers: dict[str, str], installation_id: int) -> bool:
+    async def _user_installations(self, headers: dict[str, str]) -> list[tuple[int, str]]:
+        """(id, account login) of the installations the signed-in GitHub user can reach."""
+        found: list[tuple[int, str]] = []
         for page in range(1, 11):
             listing = await self._http.get(
                 f"{self._settings.github_api_url}/user/installations",
@@ -143,13 +223,16 @@ class GitHubApp:
                 headers=headers,
             )
             if listing.status_code != 200:
-                return False
+                break
             installations = listing.json().get("installations") or []
-            if any(i.get("id") == installation_id for i in installations):
-                return True
+            for installation in installations:
+                account = installation.get("account")
+                login = account.get("login") if isinstance(account, dict) else None
+                if isinstance(installation.get("id"), int):
+                    found.append((installation["id"], login if isinstance(login, str) else ""))
             if len(installations) < 100:
-                return False
-        return False
+                break
+        return found
 
     # --- installation access ---------------------------------------------------------------
 

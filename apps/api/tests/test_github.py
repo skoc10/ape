@@ -41,6 +41,8 @@ class FakeGitHub:
             REPO: {"admin": False, "push": True, "pull": True},
             SECRET_REPO: {"admin": False, "push": False, "pull": False},
         }
+        # Further installations the connecting user can reach: id -> (account, repositories).
+        self.other_installations: dict[int, tuple[str, dict[str, dict[str, bool]]]] = {}
         self.files = {
             "k8s/storefront.yaml": DEPLOYMENT,
             "k8s/README.md": "# not yaml",
@@ -64,14 +66,23 @@ class FakeGitHub:
             )
         if path == "/user/installations":
             assert auth == "Bearer user-token"
-            return httpx.Response(
-                200, json={"installations": [{"id": i} for i in self.user_installations]}
-            )
-        if path == f"/user/installations/{INSTALLATION}/repositories":
+            listed = [{"id": i, "account": {"login": "acme"}} for i in self.user_installations]
+            listed += [
+                {"id": i, "account": {"login": account}}
+                for i, (account, _) in self.other_installations.items()
+            ]
+            return httpx.Response(200, json={"installations": listed})
+        if path.startswith("/user/installations/") and path.endswith("/repositories"):
             assert auth == "Bearer user-token"
+            installation = int(path.split("/")[3])
+            repos = (
+                self.user_repos
+                if installation == INSTALLATION
+                else self.other_installations[installation][1]
+            )
             visible = [
                 {"full_name": name, "permissions": permissions}
-                for name, permissions in self.user_repos.items()
+                for name, permissions in repos.items()
                 if permissions["pull"]
             ]
             return httpx.Response(200, json={"repositories": visible})
@@ -252,6 +263,8 @@ def test_without_credentials_the_feature_is_off(
         "repo": None,
         "manifest_path": "/",
         "install_url": None,
+        "owner_install_url": None,
+        "connect_url": None,
         "can_manage": True,
     }
     body = {"installation_id": INSTALLATION, "code": "x", "state": "y"}
@@ -621,3 +634,110 @@ def test_a_patch_with_a_masking_placeholder_is_never_committed() -> None:
     )
     assert plan.result.files == {} and plan.result.applied == []
     assert [m.reason for m in plan.result.manual] == ["the patch contains a masked value"]
+
+
+# --- an installation made by somebody else (the customer's owner) -------------------------
+
+
+def authorize(
+    client: TestClient, headers: dict[str, str], *, pick: int | None = None, code: str = "good-code"
+) -> Any:
+    params = {"pick": pick} if pick is not None else {}
+    status = client.get("/v1/settings/github", headers=headers, params=params).json()
+    assert status["connect_url"].startswith(
+        "https://github.test/login/oauth/authorize?client_id=client-id&state="
+    )
+    state = status["connect_url"].split("state=")[1]
+    return client.post(
+        "/v1/settings/github/authorization", json={"code": code, "state": state}, headers=headers
+    )
+
+
+def test_owner_link_carries_no_state_and_a_later_sign_in_connects_the_installation(
+    gh_client: TestClient, auth_a: dict[str, str], auth_b: dict[str, str], github: FakeGitHub
+) -> None:
+    status = gh_client.get("/v1/settings/github", headers=auth_a).json()
+    # Safe to forward to anybody: it names no workspace and no user.
+    assert status["owner_install_url"] == "https://github.test/apps/audit-fixes/installations/new"
+
+    # The owner has installed the App; the engineer signs in to GitHub from the panel.
+    github.user_repos[READ_ONLY_REPO] = {"admin": False, "push": False, "pull": True}
+    response = authorize(gh_client, auth_a)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["choices"] == [] and body["status"]["connected"] is True
+    # Limited to what that person can push to, exactly as when they install it themselves.
+    listed = gh_client.get("/v1/settings/github/repos", headers=auth_a).json()
+    assert [r["full_name"] for r in listed] == [REPO]
+    # Nothing leaks to another workspace.
+    assert gh_client.get("/v1/settings/github", headers=auth_b).json()["connected"] is False
+
+
+def test_sign_in_without_a_reachable_installation_connects_nothing(
+    gh_client: TestClient, auth_a: dict[str, str], github: FakeGitHub
+) -> None:
+    # The App is installed, but this GitHub user can only read there.
+    github.user_repos = {REPO: {"admin": False, "push": False, "pull": True}}
+    assert authorize(gh_client, auth_a).status_code == 404
+    # Not installed anywhere this user can see.
+    github.user_installations = []
+    assert authorize(gh_client, auth_a).status_code == 404
+    # A code that GitHub does not accept.
+    assert authorize(gh_client, auth_a, code="stolen-or-expired").status_code == 403
+    assert gh_client.get("/v1/settings/github", headers=auth_a).json()["connected"] is False
+
+
+def test_several_installations_have_to_be_picked_and_the_pick_is_checked(
+    gh_client: TestClient, auth_a: dict[str, str], auth_b: dict[str, str], github: FakeGitHub
+) -> None:
+    github.other_installations[777] = (
+        "globex",
+        {"globex/platform": {"admin": True, "push": True, "pull": True}},
+    )
+    github.other_installations[888] = (
+        "initech",
+        {"initech/site": {"admin": False, "push": False, "pull": True}},
+    )
+    first = authorize(gh_client, auth_a).json()
+    # The read-only one is not offered; nothing is connected by guessing.
+    assert first["choices"] == [
+        {"installation_id": INSTALLATION, "account": "acme"},
+        {"installation_id": 777, "account": "globex"},
+    ]
+    assert first["status"]["connected"] is False
+
+    picked = authorize(gh_client, auth_a, pick=777)
+    assert picked.status_code == 200 and picked.json()["status"]["connected"] is True
+    # Picking one the user cannot push to is refused, even though the state is ours.
+    assert authorize(gh_client, auth_a, pick=888).status_code == 403
+    assert authorize(gh_client, auth_a, pick=31337).status_code == 403
+
+    # A state made for one workspace or user does not work for another.
+    state = gh_client.get("/v1/settings/github", headers=auth_a).json()["connect_url"]
+    foreign = gh_client.post(
+        "/v1/settings/github/authorization",
+        json={"code": "good-code", "state": state.split("state=")[1]},
+        headers=auth_b,
+    )
+    assert foreign.status_code == 400
+
+
+def test_members_cannot_connect_by_authorization(
+    gh_client: TestClient,
+    tenant_a: Tenant,
+    auth_a: dict[str, str],
+    admin_db: psycopg.Connection[Any],
+) -> None:
+    admin_db.execute(
+        'update "member" set role = \'member\' where "userId" = %s', (tenant_a.user_id,)
+    )
+    status = gh_client.get("/v1/settings/github", headers=auth_a).json()
+    assert status["can_manage"] is False
+    assert status["owner_install_url"] is None and status["connect_url"] is None
+    # Refused for the role, before the state or the code is even looked at.
+    response = gh_client.post(
+        "/v1/settings/github/authorization",
+        json={"code": "good-code", "state": "anything"},
+        headers=auth_a,
+    )
+    assert response.status_code == 403

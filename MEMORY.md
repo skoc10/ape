@@ -502,6 +502,24 @@ freelancer müşteri reposuna yazabilse de genelde owner değildir. Kararlar:
 - Backlog: PDB ve NetworkPolicy gibi **yeni kaynak** öneren düzeltmeler için zip'e
   "eklenecek manifestler" bölümü; örneklenen düşük bulgular için grup düzeyinde LLM metni.
 
+### GitHub: owner kurulum linki ve ayrı bağlama (2026-11-27)
+
+- **İki adım ayrıldı.** (1) Kurulum: `owner_install_url` state taşımayan düz kurulum
+  linkidir; müşterinin organizasyon owner'ına gönderilir, panel hesabı gerekmez, tek başına
+  hiçbir workspace'e bir şey bağlamaz. Owner kurulumdan sonra `/github/installed` (oturumsuz,
+  beyaz etiketli) sayfasına düşer. (2) Bağlama: `connect_url` yalnızca GitHub girişi yaptırır
+  (`/login/oauth/authorize`); `POST /v1/settings/github/authorization` kullanıcının
+  erişebildiği kurulumlardan, push edebildiği en az bir repo olanları aday sayar.
+- Tek aday varsa bağlanır; birden fazlaysa `choices` döner ve seçim ikinci bir girişin
+  imzalı state'inde (`inst` claim, `?pick=`) taşınır. İstekten gelen hiçbir değer kurulumu
+  adlandırmaz; seçilen kurulum yine adaylar içinde olmalıdır.
+- Güvenlik kuralı aynı: workspace yalnızca bağlayan kişinin push edebildiği repolarla
+  sınırlı; kullanıcı token'ı yalnızca o istek boyunca yaşar, saklanmaz. Giriş başına en
+  fazla 20 kurulum taranır.
+- Eski yol (admin kendisi owner ise kur ve bağla, `install_url`) duruyor.
+- Callback (`/github/callback`): state yoksa → `/github/installed`; state + installation_id
+  → eski uç; yalnızca state → yeni uç.
+
 ## Kullanıcı Aksiyonu Gerekenler
 
 - **`ape-secrets` yedeği (4.6).** `kubectl -n ape get secret ape-secrets -o yaml` çıktısı güvenli bir
