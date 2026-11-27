@@ -12,7 +12,7 @@ from ape.core.db import Database
 from ape.core.deps import CurrentPrincipal
 from ape.core.tenancy import Principal
 from ape.github.app import GitHubApp, GitHubError, GitHubNotConfigured
-from ape.github.pull_request import plan_pull_request
+from ape.github.pull_request import PullRequestPlan, plan_pull_request
 from ape.repos import audit_runs, clusters, findings, org_settings
 
 router = APIRouter(prefix="/v1", tags=["github"])
@@ -302,6 +302,28 @@ async def choose_repo(
     return _status(github, row, principal)
 
 
+def _no_match_message(
+    plan: PullRequestPlan, sources: dict[str, str], config: dict[str, Any]
+) -> str:
+    """Says what was looked for and where, so the reader can tell a wrong repository or
+    directory from manifests that are rendered by Helm."""
+    targets = sorted({str(m.request.target) for m in plan.result.manual})
+    shown = ", ".join(targets[:3]) + (f" and {len(targets) - 3} more" if len(targets) > 3 else "")
+    directory = str(config["manifest_path"] or "/")
+    if not sources:
+        where = f"no .yaml or .yml file was found under {directory} in {config['github_repo']}"
+    else:
+        where = (
+            f"{len(sources)} YAML files under {directory} in {config['github_repo']} were read "
+            "and none of them defines these resources"
+        )
+    return (
+        f"none of the patches matches a manifest: {where}. Looked for {shown}. "
+        "Check the repository and the manifest directory, or use Download fixes when the "
+        "manifests are rendered by Helm."
+    )
+
+
 class PullRequestOut(BaseModel):
     pr_url: str
     applied: int
@@ -351,10 +373,7 @@ async def open_pull_request(
             score=run["score"],
         )
         if not plan.result.files:
-            raise HTTPException(
-                status.HTTP_409_CONFLICT,
-                "none of the patches matches a manifest in the selected directory",
-            )
+            raise HTTPException(status.HTTP_409_CONFLICT, _no_match_message(plan, sources, config))
         pr_url = await github.open_pull_request(
             installation_id,
             repo,
