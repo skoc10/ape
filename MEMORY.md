@@ -398,7 +398,7 @@ yapılmamalı; ağır doğrulamalar CI'da.
 ### 4.6 VPS'te k3s dağıtımı (2026-11-25, tamamlandı)
 
 - **Sunucu:** GCP `e2-standard-2` `ape-cp-01` (2 vCPU, 8 GB, 80 GB, Ubuntu 24.04), SSH
-  `office-access@35.207.186.10`, kubeconfig `~/.kube/config`. DNS: `cp.skoc.site` ve
+  `<ssh-user>@<server-ip>` (gerçek değerler bilerek repoda tutulmuyor; sunucu sahibinde), kubeconfig `~/.kube/config`. DNS: `cp.skoc.site` ve
   `files.skoc.site` (Cloudflare DNS-only).
 - **Yayın:** `agent-v0.1.0` ve `cp-v0.1.0` etiketleri; beş imaj ve iki chart `ghcr.io/skoc10`
   altında, depo public olduğu için paketler de doğrudan public çıktı.
