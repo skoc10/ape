@@ -108,7 +108,53 @@ Logs are read with `kubectl -n ape logs deploy/ape-api` (JSON lines with `trace_
 ## 7. Backup and a restore drill
 
 With `postgres.backup.enabled: true`, CloudNativePG takes a daily base backup and archives WAL
-into the `backups` bucket.
+continuously. There are two destinations.
+
+### 7a. Off the node (recommended)
+
+A backup that lives on the machine it protects is lost with the machine. Send backups to an
+S3-compatible bucket somewhere else (Cloudflare R2, Backblaze B2, AWS S3, ...):
+
+1. Create a bucket that is used for nothing else, and an access key that can only use that
+   bucket (read, write, list, delete). Do not reuse a key that can reach other data.
+2. Store the key in the cluster:
+
+   ```bash
+   kubectl -n ape create secret generic pg-backup-offsite \
+     --from-literal=ACCESS_KEY_ID=... --from-literal=SECRET_ACCESS_KEY=...
+   ```
+
+3. Set in your values file and upgrade the release:
+
+   ```yaml
+   postgres:
+     backup:
+       enabled: true
+       external:
+         enabled: true
+         endpointUrl: https://<account>.r2.cloudflarestorage.com   # leave out for AWS S3
+         destinationPath: s3://<bucket>/ape
+         existingSecret: pg-backup-offsite
+   ```
+
+4. Take a base backup right away (see below): WAL archived to the new destination is only
+   useful together with a base backup that is there too.
+
+Switching an existing installation from 7b to 7a: the new destination has to be empty. The
+backups in the in-cluster bucket stay where they are and are no longer extended; delete them
+only after a restore from the new destination has worked.
+
+### 7b. In the cluster
+
+Without `external.enabled`, backups go to the `backups` bucket of the in-cluster S3 storage.
+This protects against a broken database, not against losing the machine.
+
+The backup bucket has an S3 identity of its own (`S3_BACKUP_ACCESS_KEY` and
+`S3_BACKUP_SECRET_KEY` in `ape-secrets`). The keys the api and the worker run with cannot
+read it: a backup holds every tenant without row level security. From outside, the file host
+routes only the report bucket.
+
+### Checking, on demand, and the restore drill
 
 ```bash
 kubectl -n ape get backups.postgresql.cnpg.io
@@ -118,8 +164,9 @@ kubectl cnpg status ape-pg -n ape            # needs the cnpg kubectl plugin
 Take a backup on demand by creating a `Backup` object (`kind: Backup`, `spec.cluster.name: ape-pg`)
 and wait until `kubectl -n ape get backups.postgresql.cnpg.io` shows it as completed.
 
-Try a restore once, before you need it: create a second cluster from the backup, compare row
-counts with the live one, then delete it (`kubectl -n ape delete cluster ape-pg-restore`).
+Try a restore once, before you need it, and again after changing the destination: create a
+second cluster from the backup, compare row counts with the live one, then delete it
+(`kubectl -n ape delete cluster ape-pg-restore`).
 
 ```yaml
 apiVersion: postgresql.cnpg.io/v1
@@ -133,16 +180,20 @@ spec:
   externalClusters:
     - name: ape-pg
       barmanObjectStore:
+        # 7b, in the cluster:
         destinationPath: s3://backups/
         endpointURL: http://ape-s3:8333
         s3Credentials:
-          accessKeyId: {name: ape-secrets, key: S3_ACCESS_KEY}
-          secretAccessKey: {name: ape-secrets, key: S3_SECRET_KEY}
+          accessKeyId: {name: ape-secrets, key: S3_BACKUP_ACCESS_KEY}
+          secretAccessKey: {name: ape-secrets, key: S3_BACKUP_SECRET_KEY}
+        # 7a, off the node: the destinationPath and endpointURL from your values, and
+        #   accessKeyId: {name: pg-backup-offsite, key: ACCESS_KEY_ID}
+        #   secretAccessKey: {name: pg-backup-offsite, key: SECRET_ACCESS_KEY}
 ```
 
-Note that the S3 storage runs on the same VPS: a backup there protects against a broken
-database, not against losing the machine. For that, point `s3.mode: external` at storage
-outside the VPS, or copy the `backups` bucket off the machine regularly.
+Not covered by these backups: the `snapshots` and `reports` buckets (collected inventories
+and rendered reports) and the `ape-secrets` Secret. Keep a copy of the Secret outside the
+cluster; without `MASKING_KEY` and the database passwords a restored database is of no use.
 
 ## Upgrading
 
@@ -150,5 +201,21 @@ outside the VPS, or copy the `backups` bucket off the machine regularly.
 helm upgrade ape oci://ghcr.io/skoc10/charts/ape-control-plane -n ape -f values-production.yaml --wait
 ```
 
+Check first that no audit is running; restarting the worker interrupts it, and it is only
+picked up again after ten minutes:
+
+```bash
+kubectl -n ape exec ape-pg-1 -c postgres -- psql -U postgres -d ape -Atc \
+  "select count(*) from audit_runs where status not in ('completed','failed')"
+```
+
 A new migration job runs with every upgrade. Agents reconnect on their own within a minute
 when the `api` pod restarts.
+
+### Upgrading to a chart with separate storage identities (0.1.9 and later)
+
+The first upgrade adds `S3_BACKUP_ACCESS_KEY` and `S3_BACKUP_SECRET_KEY` to `ape-secrets`,
+restarts the S3 storage with two bucket-scoped identities and switches the database's WAL
+archiving to the backup identity. Existing backups stay readable. Back up `ape-secrets` again
+afterwards: it has two new keys. If you use `secrets.existingSecret`, add the two keys to
+your Secret before upgrading.

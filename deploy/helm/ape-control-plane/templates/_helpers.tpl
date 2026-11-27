@@ -35,6 +35,11 @@ app.kubernetes.io/component: {{ .component }}
 {{- if eq .Values.s3.mode "seaweedfs" -}}http://{{ .Release.Name }}-s3:8333{{- else -}}{{ required "s3.external.endpointUrl is required" .Values.s3.external.endpointUrl }}{{- end -}}
 {{- end -}}
 
+{{/* True when backups go to the in-cluster S3 storage. */}}
+{{- define "cp.localBackup" -}}
+{{- if and .Values.postgres.backup.enabled (not .Values.postgres.backup.external.enabled) (eq .Values.postgres.mode "cnpg") -}}true{{- end -}}
+{{- end -}}
+
 {{- define "cp.publicUrl" -}}
 {{- if .Values.ingress.tls.enabled -}}https{{- else -}}http{{- end -}}://{{ required "host is required, e.g. --set host=cp.example.com" .Values.host }}
 {{- end -}}

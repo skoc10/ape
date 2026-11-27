@@ -573,7 +573,32 @@ Tasarım: `docs/design/helm-awareness.md`. Kod: `apps/api/ape/github/helm.py`.
 - Backlog: doğrulamalı mod (izole `helm template`), ApplicationSet, helmfile, repodaki
   chart şablonlarından anahtar, katalog genişletme.
 
+### Faz 2, 2. adım: D27 ve D28 (2026-11-27)
+
+- **D27, iki S3 kimliği:** SeaweedFS'te `app` kimliği yalnızca `snapshots` ve `reports`
+  bucket'larında `Read/Write/List/Tagging:<bucket>`; `backup` kimliği yalnızca `backups`.
+  `Admin` hiçbir kimlikte yok (bucket'ları sunucu `-bucket` ile kendisi açar). Yeni anahtarlar
+  `ape-secrets` içinde `S3_BACKUP_ACCESS_KEY` / `S3_BACKUP_SECRET_KEY`; yalnızca S3 pod'una ve
+  CNPG Cluster'a verilir. Yerelde gerçek SeaweedFS 4.55 ile sınandı: app kimliği backups'ta
+  okuma/yazma/listeleme/silme ve bucket oluşturma/silmede AccessDenied alıyor; multipart
+  yükleme ve imzalı indirme çalışıyor.
+- **Ingress:** `files.` adresi yalnızca `/<reports bucket>/` yolunu yönlendirir (önceden `/`).
+- **D28, düğüm dışı yedek:** `postgres.backup.external.{enabled,endpointUrl,destinationPath,
+  existingSecret}`; açıkken yedek ve WAL doğrudan harici S3'e gider, cluster içinde backup
+  bucket'ı ve kimliği oluşmaz. Ara kopyalama işi bilerek yok.
+- Chart sürümü 0.2.0 (yayın etiketi sürümü yine belirler). CI: render kontrolleri ve kind
+  üzerinde gerçek WAL arşivi + app kimliğinin reddedildiği test.
+- **Canlıda geçiş sırası:** (1) yeni chart ile upgrade (D27 kendiliğinden); (2) kullanıcı harici
+  bucket + anahtar verince secret ve values, upgrade, hemen tam yedek; (3) geri yükleme
+  tatbikatı; (4) eski yerel yedeklerin silinmesi kullanıcı onayıyla.
+- Backlog: `snapshots`/`reports` bucket'larının dış kopyası; CNPG Barman Cloud eklentisine
+  geçiş (`barmanObjectStore` kullanımdan kalkıyor); GCS için yerel kimlik (`googleCredentials`).
+
 ## Kullanıcı Aksiyonu Gerekenler
+
+- **Düğüm dışı yedek (D28):** yalnızca yedek için kullanılacak harici bir S3 uyumlu bucket ve
+  yalnızca o bucket'a yetkili bir erişim anahtarı (rehber: `deploy/k3s/README.md` bölüm 7a).
+  Sunucuda `pg-backup-offsite` secret'ı olarak oluşturulacak.
 
 - **`ape-secrets` yedeği (4.6).** `kubectl -n ape get secret ape-secrets -o yaml` çıktısı güvenli bir
   yere alınmalı; `MASKING_KEY` ve veritabanı parolaları yeniden üretilemez.
