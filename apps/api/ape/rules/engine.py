@@ -140,6 +140,23 @@ def _builtin(name: str) -> bool:
     return name in _BUILTIN_ROLES or name.startswith(_BUILTIN_PREFIXES)
 
 
+# Built-in names that stand for everybody: every account that can log in, requests without
+# any credentials, every workload (or every workload of a namespace).
+_EVERYBODY = ("system:authenticated", "system:unauthenticated", "system:anonymous")
+_ALL_SERVICE_ACCOUNTS = "system:serviceaccounts"
+
+
+def _builtin_subject(subject: Obj) -> bool:
+    """A subject Kubernetes itself puts into bindings, such as system:masters. The groups
+    that mean everybody are built in as well, but nobody is bound to them by default."""
+    name = str(subject.get("name", ""))
+    if name in _EVERYBODY or name == _ALL_SERVICE_ACCOUNTS:
+        return False
+    if name.startswith(_ALL_SERVICE_ACCOUNTS + ":"):
+        return False
+    return name.startswith(_BUILTIN_PREFIXES)
+
+
 def _roles(snapshot: Snapshot) -> Iterator[Obj]:
     for kind in ("ClusterRole", "Role"):
         for role in snapshot.kind(kind):
@@ -178,9 +195,7 @@ def rbac_002_cluster_admin(snapshot: Snapshot) -> Iterator[Finding]:
                 for s in as_list(binding.get("subjects"))
                 if isinstance(s, dict)
             ]
-            subjects = [
-                s for s in subjects if not str(s.get("name", "")).startswith(_BUILTIN_PREFIXES)
-            ]
+            subjects = [s for s in subjects if not _builtin_subject(s)]
             if subjects:
                 yield _finding("RBAC-002", ref(binding), {"subjects": subjects})
 

@@ -111,4 +111,25 @@ spec:
         resources:
           requests:
             storage: {{ .Values.s3.storage.size }}
+---
+# SeaweedFS also listens on its master, volume and filer ports, and those take no
+# credentials: the filer serves and deletes every bucket, the backups included, to anyone
+# who can reach it. Only the S3 port, which checks the identities above, is let in.
+# Needs a network plugin that enforces NetworkPolicy; k3s does out of the box.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-s3
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cp.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "cp.selector" (dict "root" . "component" "s3") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8333
 {{- end }}

@@ -20,6 +20,7 @@ object itself says who gets the access:
   object elsewhere that merely starts with such a prefix is a regular finding.
 """
 
+import re
 from typing import Any
 
 from ape.rules.model import ResourceRef
@@ -99,9 +100,15 @@ def _aks_local_accounts(subject: dict[str, Any]) -> bool:
     return subject.get("kind") == "User" and subject.get("name") in _AKS_LOCAL_ACCOUNTS
 
 
+_OBJECT_ID = re.compile(r"^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$", re.IGNORECASE)
+
+
 def _directory_group(subject: dict[str, Any]) -> bool:
-    # The admin groups of the customer's directory: their ids differ per cluster.
-    return subject.get("kind") == "Group"
+    # The admin groups of the customer's directory, which AKS binds by their object id.
+    # Any other group is somebody's addition: "system:authenticated" here would hand
+    # cluster-admin to every account that can log in.
+    name = subject.get("name")
+    return subject.get("kind") == "Group" and isinstance(name, str) and bool(_OBJECT_ID.match(name))
 
 
 _PROVIDER_ADMIN_BINDINGS = {

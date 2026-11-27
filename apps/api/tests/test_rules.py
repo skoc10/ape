@@ -332,7 +332,9 @@ def test_a_platform_name_does_not_hide_access_the_customer_handed_out() -> None:
             binding("velero-server", "cluster-admin", [account("velero", "server")]),
             binding("aks-service-binding", "cluster-admin", [account("kube-system", "aks-svc")]),
             binding(
-                "aks-cluster-admin-binding-aad", "cluster-admin", [{"kind": "Group", "name": "g"}]
+                "aks-cluster-admin-binding-aad",
+                "cluster-admin",
+                [{"kind": "Group", "name": "5f0c0e3a-0000-0000-0000-000000000000"}],
             ),
         ]
     )
@@ -389,6 +391,33 @@ def test_provider_admin_bindings_are_only_by_design_with_the_providers_own_subje
     group = [{"kind": "Group", "name": "5f0c0e3a-0000-0000-0000-000000000000"}]
     assert rated("aks-cluster-admin-binding-aad", group) == ("low", aks)
     assert rated("aks-cluster-admin-binding-aad", [*group, intruder]) == ("critical", None)
+    # Only directory groups, which AKS names by object id. A built-in group added to the
+    # binding gives cluster-admin to every account, or to every workload.
+    for everyone in ("system:authenticated", "system:serviceaccounts", "developers"):
+        assert rated(
+            "aks-cluster-admin-binding-aad", [*group, {"kind": "Group", "name": everyone}]
+        ) == ("critical", None)
+
+
+def test_cluster_admin_for_everybody_is_reported_although_the_group_is_built_in() -> None:
+    def subjects(*bound: Obj) -> list[Obj]:
+        found = [
+            f
+            for f in run_rules([binding("open-door", "cluster-admin", list(bound))])
+            if f.rule_id == "RBAC-002"
+        ]
+        return [s for f in found for s in f.evidence["subjects"]]
+
+    for everybody in (
+        {"kind": "Group", "name": "system:authenticated"},
+        {"kind": "Group", "name": "system:unauthenticated"},
+        {"kind": "User", "name": "system:anonymous"},
+        {"kind": "Group", "name": "system:serviceaccounts"},
+        {"kind": "Group", "name": "system:serviceaccounts:shop"},
+    ):
+        assert subjects(everybody) == [everybody]
+    # What Kubernetes binds by itself is still left out.
+    assert subjects({"kind": "Group", "name": "system:masters"}) == []
 
 
 # --- network -----------------------------------------------------------------------

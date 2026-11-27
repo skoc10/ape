@@ -59,7 +59,20 @@ In this order; the first that gives exactly one file wins, anything ambiguous st
 3. **Name convention**, only when exactly one file fits: `<release>/values.yaml`,
    `<release>-values.yaml`, `values/<release>.yaml`, and the same with the chart name.
 
-Not in the first version: `ApplicationSet` generators, helmfile, values passed by a
+*As built, after the phase 2 review:* three cases gave a file without evidence and now stop.
+
+- An `Application` or `HelmRelease` that deploys the release but does not lead to exactly
+  one file in this repository (several value files, inline values, `valuesFrom`, a path in
+  another repository) ends the search. Its values are known to be elsewhere, so the name
+  convention is not tried.
+- Only the `$ref/…` form of `valueFiles` is resolved; a plain path is read from inside the
+  chart package. When the path is matched from the end, the file and its directory have to
+  agree on both sides: a `values.yaml` at the root of the repository matches nothing.
+- A file found by its name that sits next to a `Chart.yaml` is only used when that chart is
+  the release's chart itself. A wrapper (umbrella) chart passes values to its dependency
+  below the dependency's name or alias; writing them at the top level would be ignored.
+
+Not in the first version: wrapper charts (see above), `ApplicationSet` generators, helmfile, values passed by a
 deploy script, values in another repository. These end on the manual list with the note.
 
 ### 3. Find the key (from a catalogue)

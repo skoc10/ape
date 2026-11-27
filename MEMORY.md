@@ -647,6 +647,29 @@ Tasarım: `docs/design/helm-awareness.md`. Kod: `apps/api/ape/github/helm.py`.
 
 ## Haftalık Review Notları
 
+### Faz 2 Review: Temiz (2026-11-27)
+
+Bağımsız reviewer `365fd63` (PR 13) ve `8655128` (PR 11, 12) üzerinde hükmü verdi: kritik veya
+yüksek bulgu yok. Üç orta bulgu review commit'lerinde testleriyle düzeltildi (PR 14, rapor:
+`reviews/faz-2-review.md`):
+
+- **O1:** values dosyası kanıtsız düzenlenebiliyordu (kökteki `values.yaml` her `valueFiles`
+  girdisiyle eşleşiyordu; çok dosyalı Application ad kuralına düşüyordu; sarmalayıcı chart'ın
+  values dosyasına en üst düzeyden yazılıyordu). Artık üçü de manuel listeye düşüyor.
+- **O2:** RBAC-002 `system:authenticated`, `system:unauthenticated`, `system:anonymous` ve
+  `system:serviceaccounts` için cluster-admin bağlamasını hiç raporlamıyordu; AKS dizin
+  binding'i her grubu kabul ediyordu (artık yalnızca nesne kimliği biçimindekiler).
+- **O3:** SeaweedFS filer, master ve volume portları pod adresinde kimliksiz açıktı; yedekler
+  anahtarsız okunup silinebiliyordu. Depolama pod'una yalnızca 8333'ü açan NetworkPolicy eklendi.
+
+Backlog (düşük): D32–D41, ayrıntılar raporda. Öne çıkanlar: katalog yalnızca chart adına bakıyor
+ve ana sürüm farkında yine düzenliyor (D32); düğüm dışı yedekler şifrelenmiyor (D36);
+`barmanObjectStore` CloudNativePG'de kullanımdan kalkıyor (D37).
+
+Kullanıcı Aksiyonu Gerekenler: önce PR 13, sonra PR 14 merge; canlıda `api` pod'undan depolama
+pod'unun 8888 portuna erişilemediğini doğrulamak; pilot öncesi düğüm dışı yedeği açıp geri
+yükleme denemek; AKS audit'ini yeniden çalıştırmak.
+
 ### Hafta 4 Review: Temiz (2026-11-25)
 
 Bağımsız reviewer `3907dc6` üzerinde hükmü verdi: kritik veya yüksek bulgu yok. Üç orta bulgu

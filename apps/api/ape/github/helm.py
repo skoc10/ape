@@ -306,24 +306,35 @@ def _charts_of(release: Release) -> dict[str, str | None]:
 
 
 def _resolve(value_file: str, paths: list[str]) -> str | None:
-    """A valueFiles entry as a path of this repository. Argo CD's ``$ref/…`` form points
-    into another source, which may be this repository under a different root, so paths
-    are compared from the end and at least the file and its directory have to agree."""
-    wanted = value_file.split("/", 1)[1] if value_file.startswith("$") else value_file
-    wanted = wanted.lstrip("./")
-    if wanted.count("/") < 1:
+    """A valueFiles entry as a path of this repository.
+
+    Only Argo CD's ``$ref/…`` form can point into a git repository; a plain path is read
+    from inside the chart package. The referenced source may be this repository under a
+    different root, so paths are compared from the end, and on both sides at least the
+    file and its directory have to agree: a bare ``values.yaml`` at the root of the
+    repository is evidence for nothing."""
+    if not value_file.startswith("$") or "/" not in value_file:
+        return None
+    wanted = posixpath.normpath(value_file.split("/", 1)[1].lstrip("/"))
+    if ".." in wanted.split("/") or "/" not in wanted:
         return None
     matches = [
-        p for p in paths if p == wanted or p.endswith("/" + wanted) or wanted.endswith("/" + p)
+        p
+        for p in paths
+        if p == wanted or p.endswith("/" + wanted) or ("/" in p and wanted.endswith("/" + p))
     ]
     return matches[0] if len(matches) == 1 else None
 
 
 def _from_argo_cd(
     release: Release, documents: dict[str, list[Any]], paths: list[str]
-) -> list[ValuesTarget]:
+) -> list[ValuesTarget] | str:
+    """The values files of the Applications that deploy this release. A reason instead when
+    such an Application exists and does not lead to one file here: its values are then
+    known to be somewhere else, and a file that merely has a fitting name is not it."""
     charts = _charts_of(release)
     found: list[ValuesTarget] = []
+    stops: list[str] = []
     for docs in documents.values():
         for doc in docs:
             if not isinstance(doc, dict) or doc.get("kind") != "Application":
@@ -349,20 +360,27 @@ def _from_argo_cd(
                 # With several files the last one wins in Helm, and which one is meant
                 # to carry this setting is the owner's decision: not ours to pick.
                 if len(files) != 1 or not isinstance(files[0], str):
+                    stops.append(
+                        "its Argo CD Application does not take its values from exactly one file"
+                    )
                     continue
                 path = _resolve(files[0], paths)
-                if path is not None:
-                    found.append(
-                        ValuesTarget(
-                            path, 0, (), charts[str(source["chart"])], "Argo CD Application"
-                        )
+                if path is None:
+                    stops.append(
+                        "the values file its Argo CD Application names was not found in "
+                        "this repository"
                     )
-    return found
+                    continue
+                found.append(
+                    ValuesTarget(path, 0, (), charts[str(source["chart"])], "Argo CD Application")
+                )
+    return stops[0] if stops else found
 
 
-def _from_flux(release: Release, documents: dict[str, list[Any]]) -> list[ValuesTarget]:
+def _from_flux(release: Release, documents: dict[str, list[Any]]) -> list[ValuesTarget] | str:
     charts = _charts_of(release)
     found: list[ValuesTarget] = []
+    stops: list[str] = []
     for path, docs in documents.items():
         for index, doc in enumerate(docs):
             if not isinstance(doc, dict) or doc.get("kind") != "HelmRelease":
@@ -379,13 +397,15 @@ def _from_flux(release: Release, documents: dict[str, list[Any]]) -> list[Values
             if release.namespace and target and target != release.namespace:
                 continue
             # Only inline values: valuesFrom points at ConfigMaps and Secrets.
-            if isinstance(spec.get("values"), dict) and not spec.get("valuesFrom"):
-                found.append(
-                    ValuesTarget(
-                        path, index, ("spec", "values"), charts[str(chart)], "Flux HelmRelease"
-                    )
+            if not isinstance(spec.get("values"), dict) or spec.get("valuesFrom"):
+                stops.append("its Flux HelmRelease does not keep its values inline")
+                continue
+            found.append(
+                ValuesTarget(
+                    path, index, ("spec", "values"), charts[str(chart)], "Flux HelmRelease"
                 )
-    return found
+            )
+    return stops[0] if stops else found
 
 
 def _looks_like_values(docs: list[Any]) -> bool:
@@ -408,9 +428,34 @@ def _matches_name(path: str, name: str) -> bool:
     )
 
 
-def _from_names(release: Release, documents: dict[str, list[Any]]) -> list[ValuesTarget]:
+def _own_values(path: str, chart: str, documents: dict[str, list[Any]], paths: list[str]) -> bool:
+    """False when the file is the values file of a chart in the repository that is not
+    ``chart`` itself. A wrapper chart passes values to a dependency below the dependency's
+    name or alias, so keys written at the top of its file would be ignored by Helm."""
+    directory, _ = posixpath.split(path)
+    folders = [directory]
+    if posixpath.basename(directory) == "values":
+        folders.append(posixpath.dirname(directory))
+    for folder in folders:
+        beside = posixpath.join(folder, "Chart.yaml")
+        if beside not in paths:
+            continue
+        docs = [d for d in documents.get(beside, []) if isinstance(d, dict)]
+        if len(docs) != 1 or docs[0].get("name") != chart:
+            return False
+        listed = docs[0].get("dependencies")
+        dependencies = listed if isinstance(listed, list) else []
+        if any(chart in (d.get("name"), d.get("alias")) for d in map(_mapping, dependencies)):
+            return False
+    return True
+
+
+def _from_names(
+    release: Release, documents: dict[str, list[Any]], paths: list[str]
+) -> list[ValuesTarget] | str:
     parents = [p for p, dependencies in PARENTS.items() if release.chart in dependencies]
     found: list[ValuesTarget] = []
+    wrapped = False
     for path, docs in documents.items():
         if not _looks_like_values(docs):
             continue
@@ -433,7 +478,15 @@ def _from_names(release: Release, documents: dict[str, list[Any]]) -> list[Value
                 parent = None
         else:
             continue
+        if not _own_values(path, parent or release.chart, documents, paths):
+            wrapped = True
+            continue
         found.append(ValuesTarget(path, 0, (), parent, "file name"))
+    if wrapped and not found:
+        return (
+            "the values file named after it belongs to another chart in this repository, "
+            "which decides the key"
+        )
     return found
 
 
@@ -445,9 +498,11 @@ def find_values(release: Release, sources: dict[str, str]) -> ValuesTarget | str
     candidates = (
         _from_argo_cd(release, documents, paths),
         _from_flux(release, documents),
-        _from_names(release, documents),
+        _from_names(release, documents, paths),
     )
     for found in candidates:
+        if isinstance(found, str):
+            return found
         targets = list(dict.fromkeys(found))
         if len(targets) == 1:
             target = targets[0]

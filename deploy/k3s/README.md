@@ -154,6 +154,10 @@ The backup bucket has an S3 identity of its own (`S3_BACKUP_ACCESS_KEY` and
 read it: a backup holds every tenant without row level security. From outside, the file host
 routes only the report bucket.
 
+The storage pod's other ports (SeaweedFS filer, master and volume server) take no
+credentials at all, so a NetworkPolicy lets other pods reach the S3 port only. k3s enforces
+it out of the box; do not start k3s with `--disable-network-policy`.
+
 ### Checking, on demand, and the restore drill
 
 ```bash
