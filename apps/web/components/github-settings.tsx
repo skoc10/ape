@@ -49,7 +49,7 @@ export function GitHubRepoForm({
       <div className="flex flex-col gap-2">
         <Label htmlFor="manifest_path">Manifest directory</Label>
         <Input id="manifest_path" name="manifest_path" defaultValue={manifestPath} placeholder="/k8s" />
-        <p className="text-xs text-muted-foreground">Only .yaml and .yml files below this directory are read.</p>
+        <p className="text-xs text-muted-foreground">Only .yaml and .yml files (also .yaml.tpl and .yml.tpl) below this directory are read.</p>
       </div>
       <div className="flex gap-2">
         <Button type="submit" disabled={pending}>

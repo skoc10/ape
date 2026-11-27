@@ -46,6 +46,7 @@ class FakeGitHub:
         self.files = {
             "k8s/storefront.yaml": DEPLOYMENT,
             "k8s/README.md": "# not yaml",
+            "k8s/notes.tpl": "kind: Deployment  # not a manifest suffix, never read",
             "other/ignored.yaml": DEPLOYMENT.replace("storefront", "elsewhere"),
         }
         self.requests: list[tuple[str, str]] = []
@@ -763,3 +764,19 @@ def test_no_match_error_says_what_was_looked_for_and_where(
     detail = gh_client.post(f"/v1/audits/{run_id}/pr", headers=auth_a).json()["detail"]
     assert "no .yaml or .yml file was found under /k8s in acme/infra" in detail
     assert "pull" not in github.created
+
+
+def test_manifest_templates_with_a_tpl_suffix_are_read(
+    gh_client: TestClient,
+    auth_a: dict[str, str],
+    tenant_a: Tenant,
+    github: FakeGitHub,
+    admin_db: psycopg.Connection[Any],
+) -> None:
+    connect(gh_client, auth_a)
+    run_id = audit_with_patch(admin_db, tenant_a)
+    github.files = {"k8s/storefront.yaml.tpl": DEPLOYMENT, "k8s/values.txt.tpl": DEPLOYMENT}
+    response = gh_client.post(f"/v1/audits/{run_id}/pr", headers=auth_a)
+    assert response.status_code == 201, response.text
+    changed = [entry["path"] for entry in github.created["tree"]["tree"]]
+    assert changed == ["k8s/storefront.yaml.tpl"]
