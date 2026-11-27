@@ -118,6 +118,10 @@ def _detect_indent(text: str) -> tuple[int, int, int]:
 
 
 def _load_file(path: str, text: str) -> _File | None:
+    # Go, Helm and Jinja templates. Some of them happen to parse as YAML ("{{ x }}" is a
+    # nested flow mapping) and would be mangled when written back.
+    if "{{" in text or "{%" in text:
+        return None
     yaml = _yaml()
     try:
         documents = list(yaml.load_all(text))

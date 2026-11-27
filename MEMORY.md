@@ -520,6 +520,26 @@ freelancer müşteri reposuna yazabilse de genelde owner değildir. Kararlar:
 - Callback (`/github/callback`): state yoksa → `/github/installed`; state + installation_id
   → eski uç; yalnızca state → yeni uç.
 
+### 4.7 kapanışı: ilk gerçek PR ve ondan çıkanlar (2026-11-27)
+
+- **4.7 tamam:** gerçek AKS cluster'ında audit, LLM (Claude, 48 bulgu, bütçe içinde), GitHub
+  bağlantısı (github.com'a karşı "Connect GitHub" yolu) ve gerçek PR
+  (`skoc10/test-fix-ape#1`: 3 yama uygulandı, 17 manuel) doğrulandı. Diff ayrıştırılarak
+  kontrol edildi: yalnızca hedef alanlar eklendi, biçim korundu, secret yok.
+- **Manuel kalanların nedeni:** kaynakların çoğu Helm values/upstream chart ile tanımlı
+  (backlog: Helm values farkındalığı).
+- **`.yaml.tpl` / `.yml.tpl` okunuyor** (`MANIFEST_SUFFIXES`): `${VAR}` yer tutuculu envsubst
+  şablonları geçerli YAML'dır. `{{` ya da `{%` içeren dosyalar (Go/Helm/Jinja) hangi uzantıda
+  olursa olsun asla yeniden yazılmaz; bazıları YAML olarak ayrışıp bozuk geri yazılabilirdi.
+  Bilinen yan etki: içinde `{{ $labels }}` gibi metin geçen düz manifestler de manuel kalır.
+- **Özet metni:** sayılar kural motorundan (`The audit found N issues ...`), ardından LLM'in
+  yalnızca ilk (en önemli bulguları gören) turunun metni. LLM'e sayı vermemesi ve "batch"
+  dememesi söylendi; önceki özetler tek turun sayısını tüm audit gibi yazıyordu.
+- **Eşleşme yoksa hata mesajı** repoyu, dizini, okunan YAML sayısını ve aranan kaynakları
+  söyler.
+- **Sağlayıcı binding'leri** (`aks-cluster-admin-binding`, `-aad`) yalnızca sağlayıcının
+  kendi subject'leriyle "tasarım gereği" sayılır.
+
 ## Kullanıcı Aksiyonu Gerekenler
 
 - **`ape-secrets` yedeği (4.6).** `kubectl -n ape get secret ape-secrets -o yaml` çıktısı güvenli bir

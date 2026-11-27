@@ -315,7 +315,10 @@ async def test_pipeline_stores_llm_output_and_token_usage(
         and stats["llm"]["templated"] == 0
     )
     assert stats["llm"]["input_tokens"] > 0 and stats["llm"]["output_tokens"] > 0
-    assert stats["summary"] == "Batch 1 looks risky."
+    # Counts from the rule engine, then the model's text about the most severe part only.
+    assert stats["summary"].startswith("The audit found 18 issues (3 critical")
+    assert stats["summary"].endswith("). Batch 1 looks risky.")
+    assert "Batch 2" not in stats["summary"]
     assert "llm" in stats["durations"]
     value = metrics.registry.get_sample_value
     assert (

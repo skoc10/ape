@@ -328,12 +328,24 @@ class Analyst:
                 "skipped_by_policy": result.skipped_by_policy,
                 "template_patches": template_patches,
             },
-            "summary": " ".join(result.summaries)[:2400] or _template_summary(found),
+            "summary": _summary(found, result.summaries),
             "top_risks": result.top_risks or _template_top_risks(found),
         }
 
 
 _SEVERITY_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+
+
+def _summary(found: list[Finding], model_summaries: list[str]) -> str:
+    """The counts come from the rule engine; the model only adds what matters most.
+
+    The model sees the audit in parts, most severe first, so its totals would be those of
+    one part. Only its first text is used: that is the part with the most severe findings.
+    """
+    counts = _template_summary(found)
+    if not model_summaries:
+        return counts
+    return f"{counts} {model_summaries[0]}"[:2400]
 
 
 def _template_summary(found: list[Finding]) -> str:

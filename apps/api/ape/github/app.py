@@ -19,6 +19,9 @@ from ape.core.config import Settings
 _ACCEPT = "application/vnd.github+json"
 _API_VERSION = "2022-11-28"
 _STATE_TTL_SECONDS = 15 * 60
+# ".tpl" covers manifests with ${VAR} placeholders that a deploy script fills in
+# (envsubst). They are valid YAML; templates that are not are skipped by the patcher.
+MANIFEST_SUFFIXES = (".yaml", ".yml", ".yaml.tpl", ".yml.tpl")
 
 
 class GitHubError(Exception):
@@ -346,7 +349,7 @@ class GitHubApp:
             path = str(entry.get("path", ""))
             if entry.get("type") != "blob" or not path.startswith(prefix):
                 continue
-            if not path.endswith((".yaml", ".yml")) or int(entry.get("size") or 0) > max_bytes:
+            if not path.endswith(MANIFEST_SUFFIXES) or int(entry.get("size") or 0) > max_bytes:
                 continue
             if len(files) >= max_files:
                 break

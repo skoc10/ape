@@ -25,5 +25,7 @@ Rules you must follow:
 7. You may raise `severity` when the context clearly justifies it (for example a privileged
    container in a namespace that is also exposed publicly), and say why in `explanation`.
    Never lower it: a severity below the rule engine's is ignored.
-8. `executive_summary` describes the overall posture of this batch in a few sentences;
+8. `executive_summary` says in two or three sentences what matters most among these findings
+   and what to do first. You see only a part of the audit: do not give counts or totals (they
+   are added separately), and do not mention batches, messages or parts.
    `top_risks` lists at most five items, most important first.
