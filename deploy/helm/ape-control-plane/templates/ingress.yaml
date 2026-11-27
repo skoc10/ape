@@ -49,11 +49,12 @@ spec:
                 name: {{ .Release.Name }}-web
                 port: {name: http}
     {{- if and .Values.s3.publicHost (eq .Values.s3.mode "seaweedfs") }}
-    # Presigned report downloads. Objects are private: only signed URLs work.
+    # Presigned report downloads. Objects are private: only signed URLs work, and only
+    # the report bucket is routed at all. Snapshots and backups have no way in from outside.
     - host: {{ .Values.s3.publicHost }}
       http:
         paths:
-          - path: /
+          - path: /{{ .Values.s3.buckets.reports }}/
             pathType: Prefix
             backend:
               service:

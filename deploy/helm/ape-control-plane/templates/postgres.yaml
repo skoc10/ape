@@ -24,15 +24,33 @@ spec:
   backup:
     retentionPolicy: {{ .Values.postgres.backup.retentionPolicy | quote }}
     barmanObjectStore:
+      {{- if .Values.postgres.backup.external.enabled }}
+      # Outside this cluster: survives the loss of the node.
+      destinationPath: {{ required "postgres.backup.external.destinationPath is required, e.g. s3://bucket/prefix" .Values.postgres.backup.external.destinationPath | quote }}
+      {{- with .Values.postgres.backup.external.endpointUrl }}
+      endpointURL: {{ . | quote }}
+      {{- end }}
+      s3Credentials:
+        accessKeyId:
+          name: {{ required "postgres.backup.external.existingSecret is required" .Values.postgres.backup.external.existingSecret }}
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: {{ .Values.postgres.backup.external.existingSecret }}
+          key: SECRET_ACCESS_KEY
+      {{- else }}
       destinationPath: s3://{{ .Values.postgres.backup.bucket }}/
       endpointURL: {{ include "cp.s3Endpoint" . }}
+      # An identity of its own that can only use the backup bucket. Backups hold every
+      # tenant and the auth tables without row level security, so the keys the api and
+      # the worker run with must not be able to read them.
       s3Credentials:
         accessKeyId:
           name: {{ include "cp.secretName" . }}
-          key: S3_ACCESS_KEY
+          key: S3_BACKUP_ACCESS_KEY
         secretAccessKey:
           name: {{ include "cp.secretName" . }}
-          key: S3_SECRET_KEY
+          key: S3_BACKUP_SECRET_KEY
+      {{- end }}
       wal:
         compression: gzip
   {{- end }}

@@ -12,7 +12,13 @@ postgres:
   storage:
     size: 20Gi
   backup:
-    enabled: true          # daily base backup + WAL archive into the S3 storage
+    enabled: true          # daily base backup + continuous WAL archive
+    # Recommended: off the node, see README.md section 7a.
+    # external:
+    #   enabled: true
+    #   endpointUrl: https://<account>.r2.cloudflarestorage.com
+    #   destinationPath: s3://<bucket>/ape
+    #   existingSecret: pg-backup-offsite
 
 observability:
   serviceMonitor:

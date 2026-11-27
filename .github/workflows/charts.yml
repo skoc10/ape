@@ -37,6 +37,32 @@ jobs:
           ! helm template t $chart -f $chart/ci/test-values.yaml | grep -q "kind: ServiceMonitor"
           helm template t $chart -f $chart/ci/test-values.yaml --set metrics.enabled=true | grep -q "kind: ServiceMonitor"
           helm template t $chart -f $chart/ci/test-values.yaml | grep -q '"127.0.0.1:9090"'
+      - name: Control Plane storage identities and backup destination
+        run: |
+          chart=deploy/helm/ape-control-plane
+          base="helm template t $chart -f $chart/ci/test-values.yaml"
+          # No identity is an admin, and the app identity never names the backup bucket.
+          ! $base --set postgres.backup.enabled=true | grep -q '"Admin"'
+          $base --set postgres.backup.enabled=true | grep -A1 '"name":"app"' | grep -vq backups
+          $base --set postgres.backup.enabled=true | grep -q '"name":"backup"'
+          # Without local backups there is no backup identity and no backup bucket.
+          ! $base | grep -q '"name":"backup"'
+          # The api and the worker never receive the backup keys.
+          test "$($base --set postgres.backup.enabled=true | grep -c 'key: S3_BACKUP_ACCESS_KEY')" = "2"
+          # Off-node destination: its own secret, nothing in the in-cluster storage.
+          ext="--set postgres.backup.enabled=true --set postgres.backup.external.enabled=true"
+          ! $base $ext
+          ! $base $ext --set postgres.backup.external.destinationPath=s3://b/p
+          out=$($base $ext --set postgres.backup.external.destinationPath=s3://b/p \
+            --set postgres.backup.external.existingSecret=offsite \
+            --set postgres.backup.external.endpointUrl=https://s3.example.test)
+          echo "$out" | grep -q 'destinationPath: "s3://b/p"'
+          echo "$out" | grep -q 'endpointURL: "https://s3.example.test"'
+          echo "$out" | grep -A2 'accessKeyId:' | grep -q 'name: offsite'
+          ! echo "$out" | grep -q '"name":"backup"'
+          ! echo "$out" | grep -q 'S3_BACKUP_ACCESS_KEY$'
+          # Only the report bucket is routed on the public file host.
+          $base --set s3.publicHost=files.example.test | grep -q 'path: /reports/'
 
   # Installs the agent chart on kind and proves the ServiceAccount is read-only.
   agent-install:
@@ -97,7 +123,9 @@ jobs:
         run: |
           helm upgrade --install ape deploy/helm/ape-control-plane -n ape --create-namespace \
             -f deploy/helm/ape-control-plane/ci/test-values.yaml --set image.tag=ci \
-            --set postgres.storage.size=1Gi --set s3.storage.size=1Gi --wait --wait-for-jobs --timeout 12m
+            --set postgres.storage.size=1Gi --set s3.storage.size=1Gi \
+            --set postgres.backup.enabled=true --set s3.publicHost=files.example.test \
+            --wait --wait-for-jobs --timeout 12m
           kubectl -n ape get pods
       - name: Migrations ran with the three roles and forced RLS
         run: |
@@ -129,7 +157,36 @@ jobs:
             echo "$ctx" | grep -q '"allowPrivilegeEscalation":false'
           done
           paths=$(kubectl -n ape get ingress ape -o jsonpath='{range .spec.rules[*].http.paths[*]}{.path}{" "}{end}')
-          test "$paths" = "/v1/agent / "
+          test "$paths" = "/v1/agent / /reports/ "
+      - name: Backups are archived with their own identity, which the app does not have
+        run: |
+          # Finish a WAL segment so that there is something to archive, then wait for it.
+          kubectl -n ape exec ape-pg-1 -c postgres -- psql -U postgres -Atc "select pg_switch_wal()"
+          kubectl -n ape wait --for=condition=ContinuousArchiving cluster/ape-pg --timeout=240s
+          # The api's keys: its own buckets work, the backup bucket is refused.
+          kubectl -n ape exec deploy/ape-api -- python -c '
+          import os, boto3
+          from botocore.config import Config
+          from botocore.exceptions import ClientError
+          assert not [k for k in os.environ if "BACKUP" in k], "the api must not hold backup keys"
+          s3 = boto3.client("s3", endpoint_url=os.environ["S3_ENDPOINT_URL"], region_name="us-east-1",
+              aws_access_key_id=os.environ["S3_ACCESS_KEY"], aws_secret_access_key=os.environ["S3_SECRET_KEY"],
+              config=Config(signature_version="s3v4", s3={"addressing_style": "path"}))
+          s3.put_object(Bucket="reports", Key="ci/probe", Body=b"x")
+          assert s3.get_object(Bucket="reports", Key="ci/probe")["Body"].read() == b"x"
+          s3.delete_object(Bucket="reports", Key="ci/probe")
+          for call in (lambda: s3.list_objects_v2(Bucket="backups"),
+                       lambda: s3.get_object(Bucket="backups", Key="ape-pg/wals/x"),
+                       lambda: s3.put_object(Bucket="backups", Key="x", Body=b"x"),
+                       lambda: s3.create_bucket(Bucket="another")):
+              try:
+                  call()
+              except ClientError as error:
+                  assert error.response["Error"]["Code"] == "AccessDenied", error
+              else:
+                  raise SystemExit("the app identity reached something it must not")
+          print("app identity: own buckets ok, backups and bucket creation denied")
+          '
       - name: Diagnostics
         if: failure()
         run: |

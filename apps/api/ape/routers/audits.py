@@ -6,6 +6,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
 
+from ape.analysis.objects import load_object_index
 from ape.core.db import Database
 from ape.core.deps import CurrentPrincipal
 from ape.gateway.endpoint import AuditNotStartable, start_collection
@@ -187,7 +188,9 @@ async def get_report_pdf_link(
 
 
 @router.get("/audits/{run_id}/fixes")
-async def download_fixes(run_id: UUID, principal: CurrentPrincipal, db: Db) -> Response:
+async def download_fixes(
+    request: Request, run_id: UUID, principal: CurrentPrincipal, db: Db
+) -> Response:
     """The audit's patches as a zip, one file per resource.
 
     Needs no connection to a repository: whoever downloads it applies the patches with the
@@ -202,7 +205,11 @@ async def download_fixes(run_id: UUID, principal: CurrentPrincipal, db: Db) -> R
         cluster = await clusters.get(tc, run["cluster_id"])
     if run["status"] != "completed":
         raise HTTPException(status.HTTP_409_CONFLICT, "the audit is not completed yet")
-    bundle = build_fix_bundle(rows, cluster_name=str(cluster["name"]) if cluster else "cluster")
+    bundle = build_fix_bundle(
+        rows,
+        cluster_name=str(cluster["name"]) if cluster else "cluster",
+        objects=await load_object_index(request.app.state.object_store, principal.org_id, run_id),
+    )
     if not bundle.files:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "this audit has no patches to download")
     log.info("fixes_downloaded", run_id=str(run_id), files=len(bundle.files))

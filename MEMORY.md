@@ -540,7 +540,65 @@ freelancer müşteri reposuna yazabilse de genelde owner değildir. Kararlar:
 - **Sağlayıcı binding'leri** (`aks-cluster-admin-binding`, `-aad`) yalnızca sağlayıcının
   kendi subject'leriyle "tasarım gereği" sayılır.
 
+### Faz 2, 1. adım: Helm farkındalığı (2026-11-27)
+
+Tasarım: `docs/design/helm-awareness.md`. Kod: `apps/api/ape/github/helm.py`.
+
+- **İlke:** values dosyası yalnızca hem dosya hem anahtar için kanıt varsa değişir. Helm
+  bilinmeyen anahtarı sessizce yok saydığı için tahmin yok; LLM'e de sorulmuyor.
+- **Release:** nesnenin etiketlerinden (`helm.sh/chart`, `app.kubernetes.io/instance`,
+  `app.kubernetes.io/component`). Nesneler saklanan maskeli snapshot'tan okunur
+  (`ape/analysis/objects.py`); snapshot yoksa davranış eskisiyle aynıdır.
+- **Values dosyası:** sırayla Argo CD `Application` (tek `valueFiles` girdisi, `$ref/...`
+  biçimi dahil, yol sondan eşleşir), Flux `HelmRelease` (inline `spec.values`), dosya adı
+  kuralı (`<ad>/values.yaml`, `<ad>-values.yaml`, `values-<ad>.yaml`, `values/<ad>.yaml`).
+  Birden fazla aday = dokunma.
+- **Katalog** (her kayıt chart'ın kendi şablonundan okundu, testle sabit): cert-manager
+  controller (1.18.2), argo-cd redis/dex/notifications/server (10.20.0), ingress-nginx
+  controller (4.15.1), opentelemetry-collector (0.183.2), grafana (14.6.1),
+  prometheus-node-exporter (6.0.0); son ikisi kube-prometheus-stack altında da. Major sürüm
+  farklıysa PR'da "key checked against chart version X" yazar.
+- **Çevrilen alanlar:** yalnızca ana container'ın `securityContext` ve `resources`'u, pod'un
+  `securityContext`'i ve `automountServiceAccountToken`. Yamanın herhangi bir parçası
+  çevrilemiyorsa tamamı manuel kalır.
+- **Çıktı:** PR'da values dosyası yerinde düzenlenir ("Helm values: chart, anahtar");
+  Download fixes zip'ine `helm-values/<namespace>-<release>.yaml`; çevrilemeyenler release
+  ve chart adıyla manuel listede.
+- **Plandan sapma:** repodaki chart şablonlarından anahtar çıkarma bu sürümde yok
+  (tasarım belgesinde "Later"). Control Plane chart indirmez, `helm` çalıştırmaz.
+- **Gerçek repodaki beklenti** (17 manuel yamadan): argocd-redis automount ve node-exporter
+  uygulanır; otel-collector için anahtar bilinir ama dosya adı (`otel-collector-values.yaml`)
+  release adıyla eşleşmediği için öneri olarak kalır; probe yamaları, grafana sidecar'ları,
+  kurum içi `volobox` chart'ı ve ApplicationSet ile gelen müşteri namespace'leri manuel.
+- Backlog: doğrulamalı mod (izole `helm template`), ApplicationSet, helmfile, repodaki
+  chart şablonlarından anahtar, katalog genişletme.
+
+### Faz 2, 2. adım: D27 ve D28 (2026-11-27)
+
+- **D27, iki S3 kimliği:** SeaweedFS'te `app` kimliği yalnızca `snapshots` ve `reports`
+  bucket'larında `Read/Write/List/Tagging:<bucket>`; `backup` kimliği yalnızca `backups`.
+  `Admin` hiçbir kimlikte yok (bucket'ları sunucu `-bucket` ile kendisi açar). Yeni anahtarlar
+  `ape-secrets` içinde `S3_BACKUP_ACCESS_KEY` / `S3_BACKUP_SECRET_KEY`; yalnızca S3 pod'una ve
+  CNPG Cluster'a verilir. Yerelde gerçek SeaweedFS 4.55 ile sınandı: app kimliği backups'ta
+  okuma/yazma/listeleme/silme ve bucket oluşturma/silmede AccessDenied alıyor; multipart
+  yükleme ve imzalı indirme çalışıyor.
+- **Ingress:** `files.` adresi yalnızca `/<reports bucket>/` yolunu yönlendirir (önceden `/`).
+- **D28, düğüm dışı yedek:** `postgres.backup.external.{enabled,endpointUrl,destinationPath,
+  existingSecret}`; açıkken yedek ve WAL doğrudan harici S3'e gider, cluster içinde backup
+  bucket'ı ve kimliği oluşmaz. Ara kopyalama işi bilerek yok.
+- Chart sürümü 0.2.0 (yayın etiketi sürümü yine belirler). CI: render kontrolleri ve kind
+  üzerinde gerçek WAL arşivi + app kimliğinin reddedildiği test.
+- **Canlıda geçiş sırası:** (1) yeni chart ile upgrade (D27 kendiliğinden); (2) kullanıcı harici
+  bucket + anahtar verince secret ve values, upgrade, hemen tam yedek; (3) geri yükleme
+  tatbikatı; (4) eski yerel yedeklerin silinmesi kullanıcı onayıyla.
+- Backlog: `snapshots`/`reports` bucket'larının dış kopyası; CNPG Barman Cloud eklentisine
+  geçiş (`barmanObjectStore` kullanımdan kalkıyor); GCS için yerel kimlik (`googleCredentials`).
+
 ## Kullanıcı Aksiyonu Gerekenler
+
+- **Düğüm dışı yedek (D28):** yalnızca yedek için kullanılacak harici bir S3 uyumlu bucket ve
+  yalnızca o bucket'a yetkili bir erişim anahtarı (rehber: `deploy/k3s/README.md` bölüm 7a).
+  Sunucuda `pg-backup-offsite` secret'ı olarak oluşturulacak.
 
 - **`ape-secrets` yedeği (4.6).** `kubectl -n ape get secret ape-secrets -o yaml` çıktısı güvenli bir
   yere alınmalı; `MASKING_KEY` ve veritabanı parolaları yeniden üretilemez.

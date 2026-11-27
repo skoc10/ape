@@ -48,11 +48,24 @@ postgres:
     size: 10Gi
     storageClass: ""
   backup:
-    # -- Daily base backup and WAL archive to the S3 storage below.
+    # -- Daily base backup and continuous WAL archive.
     enabled: false
     schedule: "0 0 3 * * *"
     retentionPolicy: 14d
+    # -- Bucket in the in-cluster S3 storage, used when `external.enabled` is false. It has
+    #    its own S3 identity: the api and the worker cannot read it.
     bucket: backups
+    # -- Send backups to an S3-compatible bucket outside this cluster instead. Recommended
+    #    for anything that matters: a backup on the node it protects is lost with the node.
+    external:
+      enabled: false
+      # -- e.g. https://<account>.r2.cloudflarestorage.com; leave empty for AWS S3.
+      endpointUrl: ""
+      # -- s3://bucket or s3://bucket/prefix
+      destinationPath: ""
+      # -- Secret in the release namespace with ACCESS_KEY_ID and SECRET_ACCESS_KEY of a
+      #    key that can only use that bucket.
+      existingSecret: ""
   external:
     host: ""
     port: 5432
