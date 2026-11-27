@@ -741,3 +741,25 @@ def test_members_cannot_connect_by_authorization(
         headers=auth_a,
     )
     assert response.status_code == 403
+
+
+def test_no_match_error_says_what_was_looked_for_and_where(
+    gh_client: TestClient,
+    auth_a: dict[str, str],
+    tenant_a: Tenant,
+    github: FakeGitHub,
+    admin_db: psycopg.Connection[Any],
+) -> None:
+    connect(gh_client, auth_a)
+    run_id = audit_with_patch(admin_db, tenant_a)
+    # An application repository: YAML files, but no manifest of the audited resources.
+    github.files = {"k8s/docker-compose.yml": "services: {}\n", "k8s/ci.yaml": "on: push\n"}
+    detail = gh_client.post(f"/v1/audits/{run_id}/pr", headers=auth_a).json()["detail"]
+    assert "2 YAML files under /k8s in acme/infra were read" in detail
+    assert "Deployment/shop/storefront" in detail and "Service/shop/from-helm" in detail
+    assert "Download fixes" in detail
+
+    github.files = {"k8s/README.md": "# nothing here", "elsewhere/app.yaml": "a: 1\n"}
+    detail = gh_client.post(f"/v1/audits/{run_id}/pr", headers=auth_a).json()["detail"]
+    assert "no .yaml or .yml file was found under /k8s in acme/infra" in detail
+    assert "pull" not in github.created

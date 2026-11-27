@@ -257,7 +257,11 @@ def test_platform_components_are_reported_low_and_labelled() -> None:
             role("ClusterRole", "cert-manager-controller-issuers", secrets),
             role("Role", "ingress-nginx-internal", secrets, "edge"),
             role("ClusterRole", "secretproviderrotation-role", secrets),
-            binding("aks-cluster-admin-binding", "cluster-admin", subject),
+            binding(
+                "aks-cluster-admin-binding",
+                "cluster-admin",
+                [{"kind": "User", "name": "clusterAdmin"}, {"kind": "User", "name": "clusterUser"}],
+            ),
             exporter,
             # Not platform components: a similar name is not enough, and neither is
             # living in a namespace that is named like one.
@@ -354,6 +358,37 @@ def test_a_platform_name_does_not_hide_access_the_customer_handed_out() -> None:
     assert severity["ClusterRoleBinding/-/azure-devops-deployer"] == "critical"
     assert severity["ClusterRoleBinding/-/aws-developers"] == "critical"
     assert severity["ClusterRoleBinding/-/argocd-application-controller"] == "low"
+
+
+def test_provider_admin_bindings_are_only_by_design_with_the_providers_own_subjects() -> None:
+    local = [{"kind": "User", "name": "clusterAdmin"}, {"kind": "User", "name": "clusterUser"}]
+    intruder = {"kind": "User", "name": "contractor@example.com"}
+
+    def rated(name: str, subjects: list[Obj]) -> tuple[str, str | None]:
+        (finding,) = [
+            f
+            for f in run_rules([binding(name, "cluster-admin", subjects)])
+            if f.rule_id == "RBAC-002"
+        ]
+        return finding.severity, finding.evidence.get("platformComponent")
+
+    aks = "Azure Kubernetes Service"
+    assert rated("aks-cluster-admin-binding", local) == ("low", aks)
+    assert rated("aks-cluster-admin-binding", local[:1]) == ("low", aks)
+    # Somebody added a subject to the binding AKS created: the name no longer excuses it.
+    assert rated("aks-cluster-admin-binding", [*local, intruder]) == ("critical", None)
+    assert rated("aks-cluster-admin-binding", [{"kind": "Group", "name": "everyone"}]) == (
+        "critical",
+        None,
+    )
+    assert rated(
+        "aks-cluster-admin-binding",
+        [{"kind": "ServiceAccount", "namespace": "shop", "name": "clusterAdmin"}],
+    ) == ("critical", None)
+    # The directory variant binds the customer's admin groups, whose ids differ per cluster.
+    group = [{"kind": "Group", "name": "5f0c0e3a-0000-0000-0000-000000000000"}]
+    assert rated("aks-cluster-admin-binding-aad", group) == ("low", aks)
+    assert rated("aks-cluster-admin-binding-aad", [*group, intruder]) == ("critical", None)
 
 
 # --- network -----------------------------------------------------------------------

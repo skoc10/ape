@@ -13,7 +13,8 @@ object itself says who gets the access:
   account of the same component, or of a system namespace. A binding that hands
   cluster-admin to a user, a group or somebody else's service account is the customer's
   own decision whatever it is called; the few bindings a cloud provider creates for
-  users and groups are listed by their exact name;
+  users and groups are listed by their exact name together with the subjects the
+  provider puts there, so an extra subject added to one of them is reported in full;
 * the cloud providers' prefixes are short and generic ("aws", "azure", "gke"), and what
   the provider manages is cluster-scoped or lives in its own namespaces. A namespaced
   object elsewhere that merely starts with such a prefix is a regular finding.
@@ -88,8 +89,25 @@ _PROVIDER_NAMESPACES = frozenset(
     }
 )
 
-# cluster-admin bindings to users or groups that a provider creates on every cluster.
-_PROVIDER_ADMIN_BINDINGS = frozenset({"aks-cluster-admin-binding", "aks-cluster-admin-binding-aad"})
+# cluster-admin bindings to users or groups that a provider creates on every cluster, with
+# the subjects the provider puts there. The name is not enough here either: anybody who
+# may edit bindings can add a subject to an existing one.
+_AKS_LOCAL_ACCOUNTS = frozenset({"clusterAdmin", "clusterUser"})
+
+
+def _aks_local_accounts(subject: dict[str, Any]) -> bool:
+    return subject.get("kind") == "User" and subject.get("name") in _AKS_LOCAL_ACCOUNTS
+
+
+def _directory_group(subject: dict[str, Any]) -> bool:
+    # The admin groups of the customer's directory: their ids differ per cluster.
+    return subject.get("kind") == "Group"
+
+
+_PROVIDER_ADMIN_BINDINGS = {
+    "aks-cluster-admin-binding": _aks_local_accounts,
+    "aks-cluster-admin-binding-aad": _directory_group,
+}
 
 _SEPARATORS = ("-", ":", ".", "_")
 
@@ -130,11 +148,15 @@ def platform_component(
             and resource.namespace not in _PROVIDER_NAMESPACES
         ):
             return None
-        if rule_id == "RBAC-002" and name not in _PROVIDER_ADMIN_BINDINGS:
+        if rule_id == "RBAC-002":
             subjects = (evidence or {}).get("subjects")
             if not isinstance(subjects, list) or not subjects:
                 return None
-            if not all(_subject_of_component(s, component, prefixes) for s in subjects):
+            expected = _PROVIDER_ADMIN_BINDINGS.get(name)
+            if expected is not None:
+                if not all(isinstance(s, dict) and expected(s) for s in subjects):
+                    return None
+            elif not all(_subject_of_component(s, component, prefixes) for s in subjects):
                 return None
         return component
     return None
