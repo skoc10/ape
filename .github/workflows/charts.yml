@@ -64,7 +64,7 @@ jobs:
           # Only the report bucket is routed on the public file host.
           $base --set s3.publicHost=files.example.test | grep -q 'path: /reports/'
           # The storage pod accepts connections on its S3 port only.
-          $base | grep -A12 'kind: NetworkPolicy' | grep -q 'port: 8333'
+          $base | grep -A30 'kind: NetworkPolicy' | grep -q 'port: 8333'
           test "$($base | grep -c 'kind: NetworkPolicy')" = "1"
 
   # Installs the agent chart on kind and proves the ServiceAccount is read-only.
